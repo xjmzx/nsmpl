@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=smpl-tool
+GenericName=Audio Sample Tool
+Comment=Browse, loop, edit and publish audio samples to Nostr
+Exec=@BINDIR@/smpl-tool
+Icon=@ICONDIR@/smpl-tool.svg
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+Keywords=audio;samples;loop;edit;nostr;smpl;
+StartupNotify=true
