@@ -51,21 +51,20 @@ const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 export function Player({ file, onAudioInfo }: PlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // WaveSurfer instance + decoded buffer (used for both waveform and Web
-  // Audio loop playback).
+  // All playback runs through WaveSurfer's HTMLMediaElement. We tried a
+  // sample-accurate AudioBufferSourceNode + loop=true / loopStart /
+  // loopEnd path for region loops, but on WebKit2GTK the audio thread
+  // emits frames into the destination that never reach the sound card
+  // (visible cursor motion, audible silence) regardless of keep-alive
+  // tricks or user-gesture timing. HTMLMediaElement audio works
+  // reliably on the same backend, so region loop is implemented as a
+  // rAF-polled wrap on top of it. Trade-off: ~one rAF tick (~16ms) of
+  // overshoot at the loop boundary plus the element's seek latency.
   const wsRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const activeRegionRef = useRef<Region | null>(null);
-  const decodedBufferRef = useRef<AudioBuffer | null>(null);
-
-  // Sample-accurate region loop: bypass HTMLMediaElement and use a
-  // dedicated AudioBufferSourceNode with loop=true + loopStart/loopEnd.
-  // The audio engine handles the loop boundary atomically — zero gap.
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const loopAnchorRef = useRef(0); // ctx.currentTime when source.start fired
-  const cursorRafRef = useRef(0);
-
+  const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const loopRafRef = useRef(0);
   const loopRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
@@ -83,87 +82,37 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
     loopRef.current = loop;
   }, [loop]);
 
-  // ---- Web Audio loop helpers ---------------------------------------
-  function ensureAudioContext(): AudioContext {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new AudioContext({ latencyHint: "interactive" });
+  // ---- region loop watch (rAF-polled) -------------------------------
+  function stopRegionLoopWatch() {
+    if (loopRafRef.current) {
+      cancelAnimationFrame(loopRafRef.current);
+      loopRafRef.current = 0;
     }
-    return audioCtxRef.current;
+    loopRangeRef.current = null;
   }
 
-  async function ensureRunning(): Promise<AudioContext> {
-    const ctx = ensureAudioContext();
-    if (ctx.state === "suspended") await ctx.resume();
-    return ctx;
-  }
-
-  function stopWebAudioLoop() {
-    if (sourceRef.current) {
-      try {
-        sourceRef.current.stop();
-      } catch {
-        /* already stopped */
-      }
-      sourceRef.current.disconnect();
-      sourceRef.current = null;
-    }
-    if (cursorRafRef.current) {
-      cancelAnimationFrame(cursorRafRef.current);
-      cursorRafRef.current = 0;
-    }
-  }
-
-  async function startWebAudioLoop(start: number, end: number): Promise<boolean> {
-    const buffer = decodedBufferRef.current;
-    if (!buffer) return false;
-
-    stopWebAudioLoop();
-    wsRef.current?.pause();
-
-    const ctx = await ensureRunning();
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
-    source.loopStart = start;
-    source.loopEnd = end;
-    source.connect(ctx.destination);
-    source.start(0, start);
-    source.onended = () => {
-      // Fires when source.stop() is called (or buffer ends naturally,
-      // which should never happen with loop=true).
-      if (sourceRef.current === source) {
-        sourceRef.current = null;
-        setPlaying(false);
-      }
-    };
-
-    sourceRef.current = source;
-    loopAnchorRef.current = ctx.currentTime;
-    setPlaying(true);
-
-    // Sync WaveSurfer cursor to the Web Audio playhead at rAF rate.
+  function startRegionLoopWatch(start: number, end: number) {
+    if (loopRafRef.current) cancelAnimationFrame(loopRafRef.current);
+    loopRangeRef.current = { start, end };
     const tick = () => {
-      const r = activeRegionRef.current;
       const ws = wsRef.current;
-      if (!sourceRef.current || !audioCtxRef.current || !r || !ws) return;
-      const elapsed = audioCtxRef.current.currentTime - loopAnchorRef.current;
-      const len = source.loopEnd - source.loopStart;
-      const pos = len > 0 ? source.loopStart + (elapsed % len) : source.loopStart;
-      ws.setTime(pos);
-      setTime(pos);
-      cursorRafRef.current = requestAnimationFrame(tick);
+      const range = loopRangeRef.current;
+      if (!ws || !range) {
+        loopRafRef.current = 0;
+        return;
+      }
+      if (ws.getCurrentTime() >= range.end) {
+        ws.setTime(range.start);
+      }
+      loopRafRef.current = requestAnimationFrame(tick);
     };
-    cursorRafRef.current = requestAnimationFrame(tick);
-
-    return true;
+    loopRafRef.current = requestAnimationFrame(tick);
   }
 
-  // Stop Web Audio loop if user toggles loop off mid-playback.
+  // If loop is toggled off mid-playback, drop the wrap watch but let
+  // playback continue out to the end of the file.
   useEffect(() => {
-    if (!loop && sourceRef.current) {
-      stopWebAudioLoop();
-    }
+    if (!loop) stopRegionLoopWatch();
   }, [loop]);
 
   // ---- WaveSurfer init / load ---------------------------------------
@@ -176,8 +125,7 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
     setRegionRange(null);
     setError(null);
     activeRegionRef.current = null;
-    decodedBufferRef.current = null;
-    stopWebAudioLoop();
+    stopRegionLoopWatch();
     onAudioInfo?.(null);
 
     if (!file || !containerRef.current) return;
@@ -204,30 +152,20 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
     ws.on("ready", () => {
       if (cancelled) return;
       setDuration(ws.getDuration());
-      // If our own pre-decode hasn't landed yet (race), fall back to
-      // WaveSurfer's buffer. Otherwise our ctx-bound buffer wins.
-      if (!decodedBufferRef.current) {
-        decodedBufferRef.current = ws.getDecodedData();
-      }
       setLoading(false);
       regions.enableDragSelection({ color: REGION_FILL });
     });
     ws.on("play", () => setPlaying(true));
-    ws.on("pause", () => {
-      // Don't flip the playing flag if we're driving via Web Audio
-      // (we paused the WaveSurfer media intentionally to mute it).
-      if (!sourceRef.current) setPlaying(false);
-    });
-    ws.on("timeupdate", (t: number) => {
-      // Only let WaveSurfer push time updates when Web Audio isn't driving.
-      if (!sourceRef.current) setTime(t);
-    });
+    ws.on("pause", () => setPlaying(false));
+    ws.on("timeupdate", (t: number) => setTime(t));
     ws.on("finish", () => {
-      // Whole-file loop when no region is selected.
-      if (loopRef.current && !activeRegionRef.current) {
-        ws.setTime(0);
-        void ws.play();
-      }
+      // Whole-file loop when no region is selected; if a region is set
+      // and loop is on, the rAF watch should already have wrapped before
+      // we got here, but guard just in case.
+      if (!loopRef.current) return;
+      const r = activeRegionRef.current;
+      ws.setTime(r ? r.start : 0);
+      void ws.play();
     });
     ws.on("error", (err: Error) => {
       setError(`waveform: ${String(err.message ?? err)}`);
@@ -244,18 +182,17 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
     regions.on("region-updated", (r: Region) => {
       if (activeRegionRef.current?.id !== r.id) return;
       setRegionRange({ start: r.start, end: r.end });
-      // Live-update the running Web Audio source if we're in loop mode.
-      if (sourceRef.current) {
-        sourceRef.current.loopStart = r.start;
-        sourceRef.current.loopEnd = r.end;
+      // Live-update the wrap bounds; the next rAF tick will catch the
+      // cursor against the new range.
+      if (loopRangeRef.current) {
+        loopRangeRef.current = { start: r.start, end: r.end };
       }
     });
     regions.on("region-removed", (r: Region) => {
       if (activeRegionRef.current?.id === r.id) {
         activeRegionRef.current = null;
         setRegionRange(null);
-        // If we were looping that region, drop back to silence.
-        stopWebAudioLoop();
+        stopRegionLoopWatch();
       }
     });
 
@@ -263,29 +200,20 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
       .then((buffer) => {
         if (cancelled) return;
 
-        // Pre-decode into our own AudioContext so the buffer is bound
-        // to the context we'll play it from (matched sample rate, no
-        // resample latency) AND the context warms up before the user
-        // ever clicks Play (eliminates first-iteration startup delay).
-        // decodeAudioData transfers ownership of the ArrayBuffer, so we
-        // hand it a copy and keep the original for the Blob.
-        const ctx = ensureAudioContext();
-        void ctx.decodeAudioData(buffer.slice(0))
+        // Metadata-only decode in an OfflineAudioContext: no audio
+        // output, so no autoplay implications, and we still get
+        // sampleRate / channels / duration for the InfoPanel.
+        const meta = new OfflineAudioContext(1, 1, 44100);
+        void meta.decodeAudioData(buffer.slice(0))
           .then((b) => {
             if (cancelled) return;
-            decodedBufferRef.current = b;
             onAudioInfo?.({
               sampleRate: b.sampleRate,
               channels: b.numberOfChannels,
               duration: b.duration,
             });
           })
-          .catch(() => {
-            // Decode in our context failed (rare — bad codec); fall
-            // back to WaveSurfer's buffer when 'ready' fires.
-          });
-        // Eagerly resume so the engine is hot by play time.
-        if (ctx.state === "suspended") void ctx.resume();
+          .catch(() => { /* metadata unavailable */ });
 
         const blob = new Blob([buffer], { type: mimeFor(file.name) });
         return ws.loadBlob(blob);
@@ -298,37 +226,30 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
 
     return () => {
       cancelled = true;
-      stopWebAudioLoop();
+      stopRegionLoopWatch();
       ws.destroy();
       if (wsRef.current === ws) wsRef.current = null;
       if (regionsRef.current === regions) regionsRef.current = null;
     };
   }, [file?.path, file?.name]);
 
-  // Tear down the AudioContext on unmount (separate effect so it
-  // survives file changes).
-  useEffect(() => {
-    return () => {
-      stopWebAudioLoop();
-      if (audioCtxRef.current) {
-        void audioCtxRef.current.close();
-        audioCtxRef.current = null;
-      }
-    };
-  }, []);
-
   // ---- transport ---------------------------------------------------
-  async function play() {
+  function play() {
     const ws = wsRef.current;
     const r = activeRegionRef.current;
     if (!ws) return;
 
-    // Sample-accurate region loop via Web Audio.
-    if (loop && r && decodedBufferRef.current) {
-      if (await startWebAudioLoop(r.start, r.end)) return;
+    if (loop && r) {
+      // Region loop: seek to start, kick playback, install wrap watch.
+      if (ws.getCurrentTime() < r.start || ws.getCurrentTime() >= r.end) {
+        ws.setTime(r.start);
+      }
+      startRegionLoopWatch(r.start, r.end);
+      void ws.play().catch((e: unknown) => setError(String(e)));
+      return;
     }
 
-    // Fallback: WaveSurfer / HTMLMediaElement transport.
+    // Plain playback (whole file, with or without whole-file loop).
     if (r && (ws.getCurrentTime() < r.start || ws.getCurrentTime() >= r.end)) {
       ws.setTime(r.start);
     }
@@ -336,15 +257,12 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
   }
 
   function pause() {
-    if (sourceRef.current) {
-      stopWebAudioLoop();
-    } else {
-      wsRef.current?.pause();
-    }
+    stopRegionLoopWatch();
+    wsRef.current?.pause();
   }
 
   function stop() {
-    stopWebAudioLoop();
+    stopRegionLoopWatch();
     const ws = wsRef.current;
     if (!ws) return;
     ws.pause();
@@ -445,7 +363,7 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
           )}
           title={
             regionRange
-              ? "Loop the selected region (sample-accurate via Web Audio)"
+              ? "Loop the selected region"
               : "Loop the whole file"
           }
         >
