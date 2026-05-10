@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { FolderOpen, RefreshCw } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
 import { listAudioFiles, type AudioFile } from "../lib/tauri";
 import { cn } from "../lib/cn";
@@ -31,6 +32,16 @@ export function FileBrowser({ onSelect, selected }: FileBrowserProps) {
     }
   }
 
+  async function browse() {
+    const picked = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose samples folder",
+      defaultPath: dir || undefined,
+    });
+    if (typeof picked === "string") loadDir(picked);
+  }
+
   return (
     <Section title="Library" icon={<FolderOpen size={16} />}>
       <div className="flex gap-2">
@@ -46,15 +57,26 @@ export function FileBrowser({ onSelect, selected }: FileBrowserProps) {
           spellCheck={false}
         />
         <button
+          onClick={browse}
+          disabled={loading}
+          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
+                     text-fg disabled:opacity-50 disabled:cursor-not-allowed
+                     flex items-center gap-1.5"
+          title="Browse for folder"
+        >
+          <FolderOpen size={14} />
+          Browse
+        </button>
+        <button
           onClick={() => loadDir(dir)}
           disabled={loading || !dir}
           className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
                      text-fg disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center gap-1.5"
+                     flex items-center"
           title="Reload"
+          aria-label="Reload"
         >
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          Load
         </button>
       </div>
 
@@ -66,7 +88,7 @@ export function FileBrowser({ onSelect, selected }: FileBrowserProps) {
                      divide-y divide-surface/60 bg-bg/50">
         {files.length === 0 && !loading && !error && (
           <li className="px-3 py-3 text-muted text-xs">
-            No directory loaded. Enter a path above and press Enter.
+            No directory loaded. Click Browse, or type a path and press Enter.
           </li>
         )}
         {files.map((f) => (
