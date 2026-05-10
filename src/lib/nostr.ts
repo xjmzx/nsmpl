@@ -230,7 +230,7 @@ export async function publishFileMetadata(
 
 function sendToRelay(
   url: string,
-  event: { id: string; [k: string]: unknown },
+  event: { id: string },
   timeoutMs = 8000,
 ): Promise<RelayResult> {
   return new Promise((resolve) => {
