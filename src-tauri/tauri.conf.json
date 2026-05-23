@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "smpl-tool",
+        "title": "ndisc.smpl",
         "width": 1180,
         "height": 760,
         "minWidth": 720,
