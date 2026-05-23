@@ -81,10 +81,10 @@ export function InfoPanel({
   const [showStoredSecret, setShowStoredSecret] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
-  function handleLoad() {
+  async function handleLoad() {
     setKeyError(null);
     try {
-      const id = saveKey(keyInput);
+      const id = await saveKey(keyInput);
       setIdentity(id);
       setKeyInput("");
       setRevealNew(false);
@@ -93,23 +93,31 @@ export function InfoPanel({
       setKeyError(String(e));
     }
   }
-  function handleGenerate() {
+  async function handleGenerate() {
     setKeyError(null);
-    const id = generateIdentity();
-    setIdentity(id);
-    setShowStoredSecret(true); // user needs to back this up
+    try {
+      const id = await generateIdentity();
+      setIdentity(id);
+      setShowStoredSecret(true); // user needs to back this up
+    } catch (e) {
+      setKeyError(String(e));
+    }
   }
-  function handleLogout() {
+  async function handleLogout() {
     if (
       !confirm(
-        "Forget this nsec from local storage? Make sure you've backed it up.",
+        "Forget this nsec from the OS keychain? Make sure you've backed it up.",
       )
     ) {
       return;
     }
-    clearIdentity();
-    setIdentity(null);
-    setShowStoredSecret(false);
+    try {
+      await clearIdentity();
+      setIdentity(null);
+      setShowStoredSecret(false);
+    } catch (e) {
+      setKeyError(String(e));
+    }
   }
   async function copy(text: string, key: string) {
     try {
@@ -233,7 +241,9 @@ export function InfoPanel({
             <p className="text-xs text-alert font-mono break-all">{keyError}</p>
           )}
           <p className="text-[10px] text-muted">
-            Stored in localStorage. Replace with OS keyring before shipping.
+            Stored in OS keychain (libsecret on Linux). Dev builds use a
+            separate keychain service so dev runs don&apos;t touch the
+            installed app&apos;s identity.
           </p>
         </div>
       )}

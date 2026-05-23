@@ -1,7 +1,10 @@
 // Nostr publishing for smpl-tool.
 //
-//   Identity:   local nsec held in localStorage (scaffold-grade — move to
-//               OS keyring / nostr-tools NIP-46 / Tauri Stronghold later).
+//   Identity:   nsec held in the OS keychain (libsecret on Linux) via
+//               the Rust `keyring` crate. Dev builds use a separate
+//               keychain service so `make dev` runs don't read or
+//               overwrite the installed binary's identity. Mirrors
+//               ndisc / audio-flac-quality-check-tauri.
 //   Upload:     NIP-96 (HTTP file storage); default endpoint nostr.build.
 //   Auth:       NIP-98 (HTTP Auth event, kind 27235) with payload hash.
 //   Publish:    NIP-94 (kind 1063 file metadata) over plain WebSocket.
@@ -9,16 +12,11 @@
 // Mirrors the upload + publish flow used by https://smpl.fizx.uk (which
 // signs via NIP-07 browser extension instead) so events surface there.
 
-import {
-  generateSecretKey,
-  getPublicKey,
-  finalizeEvent,
-  nip19,
-  type EventTemplate,
-} from "nostr-tools";
+import { invoke } from "@tauri-apps/api/core";
+import { finalizeEvent, nip19, type EventTemplate } from "nostr-tools";
 
 export const DEFAULT_NIP96_ENDPOINT = "https://nostr.build/api/v2/nip96/upload";
-const KEY_STORAGE = "smpl-tool.nsec";
+const LEGACY_NSEC_KEY = "smpl-tool.nsec";
 
 export interface Identity {
   sk: Uint8Array;
@@ -27,61 +25,74 @@ export interface Identity {
   npub: string;
 }
 
-function fromSecret(sk: Uint8Array, nsec: string): Identity {
-  const pk = getPublicKey(sk);
-  return { sk, pk, nsec, npub: nip19.npubEncode(pk) };
+interface RustIdentity {
+  npub: string;
+  pk: string;
+  sk: string; // hex
+  nsec: string;
 }
 
-export function loadIdentity(): Identity | null {
-  const stored = localStorage.getItem(KEY_STORAGE);
-  if (!stored) return null;
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function fromRust(r: RustIdentity): Identity {
+  return { sk: hexToBytes(r.sk), pk: r.pk, nsec: r.nsec, npub: r.npub };
+}
+
+let migrationAttempted = false;
+
+/** One-time migration: if the keychain is empty but the legacy
+ *  localStorage nsec exists, import it into the keychain and clear the
+ *  legacy entry. Silent failure leaves the legacy entry in place. */
+async function migrateLegacyIfNeeded(): Promise<void> {
+  if (migrationAttempted) return;
+  migrationAttempted = true;
   try {
-    const decoded = nip19.decode(stored);
-    if (decoded.type !== "nsec") return null;
-    return fromSecret(decoded.data as Uint8Array, stored);
+    const current = await invoke<RustIdentity | null>("get_identity");
+    if (current) return;
+    const legacy = localStorage.getItem(LEGACY_NSEC_KEY);
+    if (!legacy) return;
+    await invoke<RustIdentity>("import_identity", { nsec: legacy });
+    localStorage.removeItem(LEGACY_NSEC_KEY);
   } catch {
-    return null;
+    /* leave legacy in place */
   }
 }
 
-/** Accept either bech32 `nsec1…` or 64-char hex. */
-export function saveKey(input: string): Identity {
-  const trimmed = input.trim();
-  let sk: Uint8Array;
-  let nsec: string;
+export async function loadIdentity(): Promise<Identity | null> {
+  await migrateLegacyIfNeeded();
+  const r = await invoke<RustIdentity | null>("get_identity");
+  return r ? fromRust(r) : null;
+}
 
+/** Accept either bech32 `nsec1…` or 64-char hex. */
+export async function saveKey(input: string): Promise<Identity> {
+  const trimmed = input.trim();
+  let nsec: string;
   if (trimmed.startsWith("nsec1")) {
-    const decoded = nip19.decode(trimmed);
-    if (decoded.type !== "nsec") {
-      throw new Error("malformed nsec");
-    }
-    sk = decoded.data as Uint8Array;
     nsec = trimmed;
   } else if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-    sk = new Uint8Array(
-      trimmed
-        .toLowerCase()
-        .match(/.{2}/g)!
-        .map((b) => parseInt(b, 16)),
-    );
+    const sk = hexToBytes(trimmed.toLowerCase());
     nsec = nip19.nsecEncode(sk);
   } else {
     throw new Error("expected nsec1… or 64-char hex");
   }
-
-  localStorage.setItem(KEY_STORAGE, nsec);
-  return fromSecret(sk, nsec);
+  const r = await invoke<RustIdentity>("import_identity", { nsec });
+  return fromRust(r);
 }
 
-export function generateIdentity(): Identity {
-  const sk = generateSecretKey();
-  const nsec = nip19.nsecEncode(sk);
-  localStorage.setItem(KEY_STORAGE, nsec);
-  return fromSecret(sk, nsec);
+export async function generateIdentity(): Promise<Identity> {
+  const r = await invoke<RustIdentity>("generate_identity");
+  return fromRust(r);
 }
 
-export function clearIdentity(): void {
-  localStorage.removeItem(KEY_STORAGE);
+export async function clearIdentity(): Promise<void> {
+  return invoke("clear_identity");
 }
 
 // ---- Hash + auth -------------------------------------------------

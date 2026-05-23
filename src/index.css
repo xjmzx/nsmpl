@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme palettes — channel triples consumed by tailwind.config.ts as
+   rgb(var(--c-x) / <alpha-value>). :root is the fizx.uk scheme (navy
+   base, emerald + violet accents); .theme-upleb — toggled by the title
+   button — swaps to the upleb.uk orange scheme. Mirrors ndisc. */
+:root {
+  --c-bg: 9 13 18;
+  --c-panel: 13 17 23;
+  --c-surface: 19 29 42;
+  --c-surface-hover: 30 45 61;
+  --c-fg: 240 246 252;
+  --c-muted: 107 122 141;
+  --c-accent: 122 240 205;
+  --c-ok: 74 222 128;
+  --c-warn: 251 191 36;
+  --c-alert: 248 113 113;
+  --c-mauve: 167 139 250;
+  --c-auburn: 178 96 58;
+}
+
+.theme-upleb {
+  --c-bg: 10 15 21;
+  --c-panel: 13 17 23;
+  --c-surface: 22 32 45;
+  --c-surface-hover: 30 45 61;
+  --c-fg: 201 209 217;
+  --c-muted: 107 122 141;
+  --c-accent: 255 182 158;
+  --c-ok: 74 222 128;
+  --c-warn: 251 191 36;
+  --c-alert: 248 113 113;
+  --c-mauve: 255 179 71;
+  --c-auburn: 178 96 58;
+}
+
 html,
 body,
 #root {
@@ -18,4 +52,21 @@ body {
 
 ::selection {
   @apply bg-surfaceHover text-fg;
+}
+
+/* Custom scrollbar — dark, slightly wider than WebKit's default, easier
+   to grab. Applies globally. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-surface-hover));
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--c-muted));
 }
