@@ -202,6 +202,84 @@ export interface PublishResult {
   relays: RelayResult[];
 }
 
+// ---- Reactions (kind:7 / kind:5) -------------------------------------
+//
+// Phase-1 plumbing for smpl-tool. There's no inbound-feed UI yet to
+// react against, so these helpers exist solely so that when smpl
+// gains such a feed (or surfaces a "reactions on my publishes" view)
+// the reaction wiring is already in place + identical in shape to
+// ndisc.blobtree / ndisc / ndisc.view.
+//
+// Signs in JS via the existing nostr-tools finalizeEvent + sendToRelay
+// pipeline (matches smpl's NIP-94 publish path). Per the Phase-1
+// design, smpl keeps its JS-signing pattern; ndisc + ndisc.blobtree
+// sign in Rust via nostr-sdk.
+
+export interface ReactionParams {
+  sk: Uint8Array;
+  /** Target event id (32-byte hex). Used for non-replaceable events. */
+  eventId: string;
+  /** Target event author pubkey (32-byte hex). */
+  authorPk: string;
+  /** Numeric kind of the target event (e.g. 1063 for an audio sample). */
+  targetKind: number;
+  /** "+" / "-" / emoji per NIP-25; classifyReaction() buckets it. */
+  content: string;
+  relays: string[];
+}
+
+export interface ReactionPublishResult {
+  eventId: string;
+  relays: RelayResult[];
+}
+
+export async function publishReaction(
+  p: ReactionParams,
+): Promise<ReactionPublishResult> {
+  const event = finalizeEvent(
+    {
+      kind: 7,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ["e", p.eventId],
+        ["p", p.authorPk],
+        ["k", String(p.targetKind)],
+      ],
+      content: p.content,
+    },
+    p.sk,
+  );
+  const relays = await Promise.all(
+    p.relays.map((url) => sendToRelay(url, event)),
+  );
+  return { eventId: event.id, relays };
+}
+
+export async function deleteReaction(
+  sk: Uint8Array,
+  reactionEventId: string,
+  relays: string[],
+): Promise<ReactionPublishResult> {
+  const event = finalizeEvent(
+    {
+      kind: 5,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ["e", reactionEventId],
+        ["k", "7"],
+      ],
+      content: "",
+    },
+    sk,
+  );
+  const results = await Promise.all(
+    relays.map((url) => sendToRelay(url, event)),
+  );
+  return { eventId: event.id, relays: results };
+}
+
+// ---- NIP-94 publish ---------------------------------------------
+
 export async function publishFileMetadata(
   p: PublishParams,
 ): Promise<PublishResult> {
