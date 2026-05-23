@@ -1,7 +1,7 @@
 {
   "name": "smpl-tool",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,10 +14,10 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.474.0",
+    "lucide-react": "^1.16.0",
     "nostr-tools": "^2.23.3",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "tailwind-merge": "^3.5.0",
     "wavesurfer.js": "^7.12.6"
   },
@@ -29,7 +29,7 @@
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.14",
     "tailwindcss": "^3.4.19",
-    "typescript": "~5.8.3",
+    "typescript": "~6.0.2",
     "vite": "^7.0.4"
   }
 }
