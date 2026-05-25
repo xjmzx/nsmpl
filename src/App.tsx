@@ -29,9 +29,18 @@ function shortNpub(npub: string): string {
   return `${npub.slice(0, 12)}…${npub.slice(-4)}`;
 }
 
+type TrackIdx = 0 | 1;
+type TrackPair<T> = [T, T];
+
 export default function App() {
-  const [selected, setSelected] = useState<AudioFile | null>(null);
-  const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
+  // Per-track state. FileBrowser clicks route to `focused`, and the
+  // InfoPanel + NostrPanel read from the focused slot too.
+  const [files, setFiles] = useState<TrackPair<AudioFile | null>>([null, null]);
+  const [audioInfos, setAudioInfos] = useState<TrackPair<AudioInfo | null>>([
+    null,
+    null,
+  ]);
+  const [focused, setFocused] = useState<TrackIdx>(0);
   // Bumped after each successful edit (trim/prune) — drives FileBrowser
   // to re-list the current dir so the new file surfaces without a
   // manual refresh.
@@ -40,6 +49,24 @@ export default function App() {
   const [profile, setProfile] = useState<ProfileMeta | null>(null);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  function loadIntoFocused(f: AudioFile) {
+    setFiles((prev) => {
+      const next: TrackPair<AudioFile | null> = [...prev] as typeof prev;
+      next[focused] = f;
+      return next;
+    });
+  }
+  function setAudioInfoFor(i: TrackIdx, info: AudioInfo | null) {
+    setAudioInfos((prev) => {
+      const next: TrackPair<AudioInfo | null> = [...prev] as typeof prev;
+      next[i] = info;
+      return next;
+    });
+  }
+
+  const focusedFile = files[focused];
+  const focusedAudioInfo = audioInfos[focused];
 
   // Apply + persist theme.
   useEffect(() => {
@@ -154,22 +181,34 @@ export default function App() {
             even split (3/8 = 37.5% vs. 50%). */}
         <div className="grid grid-cols-1 grid-rows-[minmax(0,3fr)_minmax(0,5fr)] gap-4 min-h-[640px]">
           <FileBrowser
-            onSelect={setSelected}
-            selected={selected}
+            onSelect={loadIntoFocused}
+            selected={focusedFile}
             reloadKey={editCount}
           />
-          <InfoPanel file={selected} audioInfo={audioInfo} />
+          <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
         </div>
 
-        {/* Right column: player, edit, publish */}
+        {/* Right column: two tracks + publish. FileBrowser clicks load
+            into whichever track is focused (ring-highlighted). */}
         <div className="grid grid-cols-1 gap-4">
           <Player
-            file={selected}
-            onAudioInfo={setAudioInfo}
+            file={files[0]}
+            label="1"
+            focused={focused === 0}
+            onFocus={() => setFocused(0)}
+            onAudioInfo={(i) => setAudioInfoFor(0, i)}
+            onEdited={() => setEditCount((n) => n + 1)}
+          />
+          <Player
+            file={files[1]}
+            label="2"
+            focused={focused === 1}
+            onFocus={() => setFocused(1)}
+            onAudioInfo={(i) => setAudioInfoFor(1, i)}
             onEdited={() => setEditCount((n) => n + 1)}
           />
           <NostrPanel
-            file={selected}
+            file={focusedFile}
             identity={identity}
             setIdentity={setIdentity}
           />
@@ -211,11 +250,12 @@ export default function App() {
           </span>
         )}
 
-        {/* Selected sample chip on the right (or invisible placeholder so
-            identity stays visually centered). */}
-        {selected ? (
-          <span title={selected.path}>
-            {selected.name}
+        {/* Focused-track sample chip on the right (or invisible
+            placeholder so identity stays visually centered). */}
+        {focusedFile ? (
+          <span title={focusedFile.path}>
+            <span className="text-mauve mr-1">T{focused + 1}</span>
+            {focusedFile.name}
           </span>
         ) : (
           <span className="opacity-0">·</span>

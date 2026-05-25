@@ -2,15 +2,19 @@ import { ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 interface SectionProps {
-  title: string;
+  title: ReactNode;
   icon?: ReactNode;
   children?: ReactNode;
   className?: string;
+  // Optional click handler on the whole card — used for focus-routing
+  // in multi-track layouts.
+  onClick?: () => void;
 }
 
-export function Section({ title, icon, children, className }: SectionProps) {
+export function Section({ title, icon, children, className, onClick }: SectionProps) {
   return (
     <section
+      onClick={onClick}
       className={cn(
         "rounded-xl bg-panel border border-surface/60 shadow-md",
         "p-4 flex flex-col gap-3",

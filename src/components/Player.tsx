@@ -29,6 +29,14 @@ interface PlayerProps {
   // Fired with the absolute output path after a successful trim/prune
   // so the parent can refresh the file browser.
   onEdited?: (path: string) => void;
+  // Optional label appended to "Track" in the header (e.g. "1", "2").
+  // Omitted = bare "Track" title (single-player mode).
+  label?: string;
+  // Multi-track focus routing — `focused` highlights the card, and
+  // clicking anywhere in it calls `onFocus` so the parent can re-route
+  // FileBrowser clicks / Publish / InfoPanel to this track.
+  focused?: boolean;
+  onFocus?: () => void;
 }
 
 type EditMode = "trim" | "prune";
@@ -71,7 +79,14 @@ const PROGRESS = "#89b4fa";
 const CURSOR = "#cdd6f4";
 const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 
-export function Player({ file, onAudioInfo, onEdited }: PlayerProps) {
+export function Player({
+  file,
+  onAudioInfo,
+  onEdited,
+  label,
+  focused,
+  onFocus,
+}: PlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // All playback runs through WaveSurfer's HTMLMediaElement. We tried a
@@ -328,8 +343,18 @@ export function Player({ file, onAudioInfo, onEdited }: PlayerProps) {
   const editReady = !!file && !!regionRange && regionRange.end > regionRange.start;
   const editDisabled = !editReady || editBusy !== null;
 
+  const title = label ? `Track ${label}` : "Track";
+
   return (
-    <Section title="Track" icon={<Play size={16} />}>
+    <Section
+      title={title}
+      icon={<Play size={16} />}
+      onClick={onFocus}
+      className={cn(
+        onFocus && "cursor-pointer",
+        focused && "ring-2 ring-accent/40",
+      )}
+    >
       <div className="text-xs text-muted truncate">
         {file ? file.name : "No sample loaded"}
       </div>
