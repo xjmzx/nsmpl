@@ -1,21 +1,40 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Repeat, Square, X } from "lucide-react";
+import {
+  Crop,
+  Loader2,
+  Pause,
+  Play,
+  Repeat,
+  Scissors,
+  Square,
+  X,
+} from "lucide-react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, {
   type Region,
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { Section } from "./Section";
-import { readAudioFile, type AudioFile, type AudioInfo } from "../lib/tauri";
+import {
+  pruneAudio,
+  readAudioFile,
+  trimAudio,
+  type AudioFile,
+  type AudioInfo,
+} from "../lib/tauri";
 import { cn } from "../lib/cn";
 
 interface PlayerProps {
   file: AudioFile | null;
   onAudioInfo?: (info: AudioInfo | null) => void;
-  // Fired whenever the loop region changes (drag-set, resize, or cleared)
-  // so other panels (e.g. EditPanel's trim) can act on the same range the
-  // user is auditioning. Null on file switch and on region removal.
-  onRegionChange?: (range: { start: number; end: number } | null) => void;
+  // Fired with the absolute output path after a successful trim/prune
+  // so the parent can refresh the file browser.
+  onEdited?: (path: string) => void;
 }
+
+type EditMode = "trim" | "prune";
+type EditStatus =
+  | { kind: "ok"; mode: EditMode; path: string }
+  | { kind: "err"; mode: EditMode; msg: string };
 
 const MIME_BY_EXT: Record<string, string> = {
   wav: "audio/wav",
@@ -52,7 +71,7 @@ const PROGRESS = "#89b4fa";
 const CURSOR = "#cdd6f4";
 const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 
-export function Player({ file, onAudioInfo, onRegionChange }: PlayerProps) {
+export function Player({ file, onAudioInfo, onEdited }: PlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // All playback runs through WaveSurfer's HTMLMediaElement. We tried a
@@ -86,14 +105,30 @@ export function Player({ file, onAudioInfo, onRegionChange }: PlayerProps) {
     loopRef.current = loop;
   }, [loop]);
 
-  // Bubble region changes to the parent (used by EditPanel for trim).
-  // Ref-piping the callback so an unstable parent prop can't re-fire
-  // this effect — only actual range changes do.
-  const onRegionChangeRef = useRef(onRegionChange);
-  onRegionChangeRef.current = onRegionChange;
+  // ---- edit (trim / prune) -----------------------------------------
+  const [editBusy, setEditBusy] = useState<EditMode | null>(null);
+  const [editStatus, setEditStatus] = useState<EditStatus | null>(null);
+
+  // Reset edit feedback when the user switches samples.
   useEffect(() => {
-    onRegionChangeRef.current?.(regionRange);
-  }, [regionRange]);
+    setEditStatus(null);
+  }, [file?.path]);
+
+  async function runEdit(mode: EditMode) {
+    if (!file || !regionRange || editBusy) return;
+    setEditBusy(mode);
+    setEditStatus(null);
+    try {
+      const fn = mode === "trim" ? trimAudio : pruneAudio;
+      const path = await fn(file.path, regionRange.start, regionRange.end);
+      setEditStatus({ kind: "ok", mode, path });
+      onEdited?.(path);
+    } catch (e) {
+      setEditStatus({ kind: "err", mode, msg: String(e) });
+    } finally {
+      setEditBusy(null);
+    }
+  }
 
   // ---- region loop watch (rAF-polled) -------------------------------
   function stopRegionLoopWatch() {
@@ -290,8 +325,11 @@ export function Player({ file, onAudioInfo, onRegionChange }: PlayerProps) {
     regionsRef.current?.clearRegions();
   }
 
+  const editReady = !!file && !!regionRange && regionRange.end > regionRange.start;
+  const editDisabled = !editReady || editBusy !== null;
+
   return (
-    <Section title="Player" icon={<Play size={16} />}>
+    <Section title="Track" icon={<Play size={16} />}>
       <div className="text-xs text-muted truncate">
         {file ? file.name : "No sample loaded"}
       </div>
@@ -341,6 +379,53 @@ export function Player({ file, onAudioInfo, onRegionChange }: PlayerProps) {
           <Square size={14} /> Stop
         </button>
 
+        <button
+          onClick={() => runEdit("trim")}
+          disabled={editDisabled}
+          title={
+            editBusy === "trim"
+              ? "Trimming…"
+              : !file
+                ? "Load a sample first"
+                : !regionRange
+                  ? "Drag a loop region first"
+                  : `Trim to ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} (saves next to source)`
+          }
+          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     flex items-center gap-1.5 text-fg"
+        >
+          {editBusy === "trim" ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Crop size={14} />
+          )}
+          Trim
+        </button>
+        <button
+          onClick={() => runEdit("prune")}
+          disabled={editDisabled}
+          title={
+            editBusy === "prune"
+              ? "Pruning…"
+              : !file
+                ? "Load a sample first"
+                : !regionRange
+                  ? "Drag a loop region first"
+                  : `Delete ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} and save the remainder next to source`
+          }
+          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     flex items-center gap-1.5 text-fg"
+        >
+          {editBusy === "prune" ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Scissors size={14} />
+          )}
+          Prune
+        </button>
+
         {regionRange && (
           <div
             className="ml-2 px-2 py-1 rounded-md bg-bg/50 text-[10px] font-mono
@@ -383,6 +468,17 @@ export function Player({ file, onAudioInfo, onRegionChange }: PlayerProps) {
           <Repeat size={14} /> Loop
         </button>
       </div>
+
+      {editStatus?.kind === "ok" && (
+        <p className="text-xs text-ok font-mono break-all">
+          wrote {editStatus.path}
+        </p>
+      )}
+      {editStatus?.kind === "err" && (
+        <pre className="text-xs text-alert font-mono break-all whitespace-pre-wrap">
+          {editStatus.msg}
+        </pre>
+      )}
     </Section>
   );
 }

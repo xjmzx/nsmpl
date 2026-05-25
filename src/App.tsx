@@ -4,7 +4,6 @@ import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
 import { Player } from "./components/Player";
-import { EditPanel } from "./components/EditPanel";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
 import type { AudioFile, AudioInfo } from "./lib/tauri";
@@ -33,9 +32,6 @@ function shortNpub(npub: string): string {
 export default function App() {
   const [selected, setSelected] = useState<AudioFile | null>(null);
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
-  const [regionRange, setRegionRange] = useState<
-    { start: number; end: number } | null
-  >(null);
   // Bumped after each successful edit (trim/prune) — drives FileBrowser
   // to re-list the current dir so the new file surfaces without a
   // manual refresh.
@@ -170,11 +166,6 @@ export default function App() {
           <Player
             file={selected}
             onAudioInfo={setAudioInfo}
-            onRegionChange={setRegionRange}
-          />
-          <EditPanel
-            file={selected}
-            region={regionRange}
             onEdited={() => setEditCount((n) => n + 1)}
           />
           <NostrPanel
