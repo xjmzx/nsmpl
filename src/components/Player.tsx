@@ -478,7 +478,9 @@ export function Player({
             D.btn,
             "rounded-md bg-surface hover:bg-surfaceHover",
             "disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center gap-1.5 text-fg",
+            "flex items-center justify-center gap-1.5 text-fg",
+            // Fixed width so toggling Play ↔ Pause doesn't shift the row.
+            "min-w-[5rem]",
           )}
         >
           {playing ? <Pause size={14} /> : <Play size={14} />}
@@ -550,7 +552,8 @@ export function Player({
           Prune
         </button>
 
-        {/* Gain: dB input + apply button as a single compact widget. */}
+        {/* Gain: slider with dB readout + apply button, joined as a
+            single compact chip. Range −24..+24 dB, step 0.5 dB. */}
         <div
           className={cn(
             "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
@@ -561,41 +564,40 @@ export function Player({
               ? "Applying gain…"
               : !file
                 ? "Load a sample first"
-                : `Apply ${gainDb >= 0 ? "+" : ""}${gainDb} dB and save next to source`
+                : `Apply ${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)} dB and save next to source`
           }
         >
-          <input
-            type="number"
-            value={gainDb}
-            onChange={(e) =>
-              setGainDb(
-                Math.max(-24, Math.min(24, parseFloat(e.target.value) || 0)),
-              )
-            }
-            min={-24}
-            max={24}
-            step={0.5}
-            disabled={!file || editBusy !== null}
-            aria-label="Gain in dB"
-            className={cn(
-              "w-12 px-1.5 text-xs text-right bg-transparent text-fg",
-              "font-mono outline-none border-r border-bg/40",
-              "disabled:cursor-not-allowed",
-            )}
-          />
+          <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
+            <Volume2 size={12} className="text-muted shrink-0" />
+            <input
+              type="range"
+              min={-24}
+              max={24}
+              step={0.5}
+              value={gainDb}
+              onChange={(e) => setGainDb(parseFloat(e.target.value))}
+              disabled={!file || editBusy !== null}
+              aria-label="Gain in dB"
+              className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
+            />
+            <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
+              {gainDb >= 0 ? "+" : ""}
+              {gainDb.toFixed(1)}
+            </span>
+          </div>
           <button
             onClick={runGain}
             disabled={!file || editBusy !== null}
             className={cn(
-              "px-2.5 text-xs flex items-center gap-1.5 text-fg",
+              D.btn,
+              "border-l border-bg/40 text-fg",
               "hover:bg-surfaceHover disabled:cursor-not-allowed",
+              "flex items-center gap-1.5",
             )}
           >
             {editBusy === "gain" ? (
               <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Volume2 size={14} />
-            )}
+            ) : null}
             Gain
           </button>
         </div>
