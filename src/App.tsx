@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Lock } from "lucide-react";
+import { ChevronDown, ChevronRight, KeyRound, Lock } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
@@ -13,6 +13,7 @@ import { loadIdentity, type Identity } from "./lib/nostr";
 const THEME_KEY = "smpl-tool.theme";
 const DENSITY_KEY = "smpl-tool.density";
 const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
+const NIP_EXPANDED_KEY = "smpl-tool.nip.expanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
 type Density = "slim" | "wide";
@@ -62,6 +63,9 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [density, setDensity] = useState<Density>(loadDensity);
   const [tracksVisible, setTracksVisible] = useState<TracksVisible>(loadTracksVisible);
+  const [nipExpanded, setNipExpanded] = useState<boolean>(
+    () => localStorage.getItem(NIP_EXPANDED_KEY) === "1",
+  );
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,6 +74,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(TRACKS_VISIBLE_KEY, String(tracksVisible));
   }, [tracksVisible]);
+  useEffect(() => {
+    localStorage.setItem(NIP_EXPANDED_KEY, nipExpanded ? "1" : "0");
+  }, [nipExpanded]);
 
   function pickTracksVisible(n: TracksVisible) {
     setTracksVisible(n);
@@ -145,7 +152,7 @@ export default function App() {
   return (
     <div className="min-h-screen p-6 max-w-[1400px] mx-auto flex flex-col gap-4">
       <header className="rounded-lg bg-panel border border-surface/60 px-4 py-3
-                         flex items-start justify-between gap-4">
+                         flex items-center gap-4">
         <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
@@ -173,30 +180,76 @@ export default function App() {
             </span>
           )}
         </div>
-        <div className="hidden md:flex items-center flex-wrap gap-x-2 gap-y-1 text-xs text-muted mt-1">
-          <span className="whitespace-nowrap">Publish samples to Nostr</span>
-          <span className="text-surface/80">|</span>
-          <span className="whitespace-nowrap">
-            <span className="font-mono text-accent">kind 1063</span>{" "}
-            <span className="text-fg/70">(NIP-94 — file metadata)</span>
-          </span>
-          <span className="text-surface/80">|</span>
-          <span className="whitespace-nowrap">
-            <span className="text-fg/70">tags: </span>
-            <span className="font-mono text-accent">
-              url, m, x, size, title
-            </span>
-          </span>
-          <span className="text-surface/80">|</span>
-          <span className="whitespace-nowrap">
-            <span className="text-fg/70">auth: </span>
-            <span className="font-mono text-accent">NIP-98</span>
-            <span className="text-fg/70">
-              {" "}
-              (HTTP Auth, kind 27235). Upload:{" "}
-            </span>
-            <span className="font-mono text-accent">NIP-96</span>
-          </span>
+
+        {/* NIP spec — click "Publish samples to Nostr" to expand the
+            full wire-format detail inline. Persisted; defaults collapsed. */}
+        <div className="hidden md:flex flex-1 items-center justify-end min-w-0
+                        gap-x-2 gap-y-1 flex-wrap text-xs text-muted">
+          <button
+            type="button"
+            onClick={() => setNipExpanded((p) => !p)}
+            aria-expanded={nipExpanded}
+            title={nipExpanded ? "Collapse publish spec" : "Expand publish spec"}
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-md
+                       bg-surface text-mauve font-mono text-xs
+                       hover:bg-mauve/15 transition-colors whitespace-nowrap"
+          >
+            <span>Publish samples to Nostr</span>
+            {nipExpanded ? (
+              <ChevronDown size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )}
+          </button>
+          {nipExpanded && (
+            <>
+              <span className="text-surface/80">|</span>
+              <span className="whitespace-nowrap">
+                <span className="font-mono text-accent">kind 1063</span>{" "}
+                <span className="text-fg/70">(NIP-94 — file metadata)</span>
+              </span>
+              <span className="text-surface/80">|</span>
+              <span className="whitespace-nowrap">
+                <span className="text-fg/70">tags: </span>
+                <span className="font-mono text-accent">
+                  url, m, x, size, title
+                </span>
+              </span>
+              <span className="text-surface/80">|</span>
+              <span className="whitespace-nowrap">
+                <span className="text-fg/70">auth: </span>
+                <span className="font-mono text-accent">NIP-98</span>
+                <span className="text-fg/70">
+                  {" "}
+                  (HTTP Auth, kind 27235). Upload:{" "}
+                </span>
+                <span className="font-mono text-accent">NIP-96</span>
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* View + tracks selectors — far right, height matches the version
+            chip. Square buttons with rounded corners, ndisc-styled. */}
+        <div className="hidden md:flex items-center gap-2 shrink-0">
+          <Segmented
+            label="view"
+            value={density}
+            options={[
+              { value: "slim", label: "slim" },
+              { value: "wide", label: "wide" },
+            ]}
+            onChange={setDensity}
+          />
+          <Segmented
+            label="tracks"
+            value={tracksVisible}
+            options={[
+              { value: 1, label: "1" },
+              { value: 2, label: "2" },
+            ]}
+            onChange={pickTracksVisible}
+          />
         </div>
       </header>
 
@@ -248,26 +301,7 @@ export default function App() {
       <footer className="rounded-lg bg-panel border border-surface/60 px-4 py-2
                          flex flex-wrap items-center justify-between
                          gap-x-8 gap-y-1 text-xs text-muted">
-        <div className="inline-flex items-center gap-3">
-          <Segmented
-            label="view"
-            value={density}
-            options={[
-              { value: "slim", label: "slim" },
-              { value: "wide", label: "wide" },
-            ]}
-            onChange={setDensity}
-          />
-          <Segmented
-            label="tracks"
-            value={tracksVisible}
-            options={[
-              { value: 1, label: "1" },
-              { value: 2, label: "2" },
-            ]}
-            onChange={pickTracksVisible}
-          />
-        </div>
+        <span>stack: Tauri 2 + React + TS + Tailwind</span>
 
         {/* Centered identity chip — same 3-chip pattern as ndisc /
             ndisc.blobtree. */}
@@ -327,21 +361,22 @@ function Segmented<T extends string | number>({
 }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="text-muted/70 text-[10px] uppercase tracking-wide">
+      <span className="hidden lg:inline text-muted/70 text-[10px] uppercase tracking-wide">
         {label}
       </span>
-      <span className="inline-flex rounded-md overflow-hidden border border-surface/60">
+      <span className="inline-flex rounded-md overflow-hidden bg-surface">
         {options.map((opt, i) => (
           <button
             key={String(opt.value)}
             type="button"
             onClick={() => onChange(opt.value)}
+            title={`${label}: ${opt.label}`}
             className={
-              "px-2 py-0.5 text-[10px] transition-colors " +
-              (i > 0 ? "border-l border-surface/60 " : "") +
+              "px-2.5 py-2 text-xs font-mono transition-colors " +
+              (i > 0 ? "border-l border-bg/40 " : "") +
               (value === opt.value
-                ? "bg-accent/20 text-accent"
-                : "text-muted hover:text-fg hover:bg-surface/40")
+                ? "bg-mauve text-bg"
+                : "text-muted hover:text-mauve hover:bg-mauve/15")
             }
           >
             {opt.label}
