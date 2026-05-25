@@ -124,17 +124,32 @@ export default function App() {
             </span>
           )}
         </div>
-        <p className="text-sm text-muted mt-1 text-right hidden md:block">
-          local samples · loop · edit · publish to Nostr · share via{" "}
-          <a
-            href="https://smpl.fizx.uk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent hover:underline"
-          >
-            smpl.fizx.uk
-          </a>
-        </p>
+        <div className="hidden md:flex items-stretch gap-3 text-xs mt-1">
+          <span className="self-center text-muted whitespace-nowrap">
+            Publish samples to Nostr
+          </span>
+          <div className="border-l border-surface/60 pl-3 space-y-0.5 text-muted leading-snug">
+            <div>
+              <span className="font-mono text-accent">kind 1063</span>{" "}
+              <span className="text-fg/70">(NIP-94 — file metadata)</span>
+            </div>
+            <div>
+              <span className="text-fg/70">tags: </span>
+              <span className="font-mono text-accent">
+                url, m, x, size, title
+              </span>
+            </div>
+            <div>
+              <span className="text-fg/70">auth: </span>
+              <span className="font-mono text-accent">NIP-98</span>
+              <span className="text-fg/70">
+                {" "}
+                (HTTP Auth, kind 27235). Upload:{" "}
+              </span>
+              <span className="font-mono text-accent">NIP-96</span>
+            </div>
+          </div>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 items-stretch">
@@ -147,12 +162,7 @@ export default function App() {
             selected={selected}
             reloadKey={editCount}
           />
-          <InfoPanel
-            identity={identity}
-            setIdentity={setIdentity}
-            file={selected}
-            audioInfo={audioInfo}
-          />
+          <InfoPanel file={selected} audioInfo={audioInfo} />
         </div>
 
         {/* Right column: player, edit, publish */}
@@ -167,7 +177,11 @@ export default function App() {
             region={regionRange}
             onEdited={() => setEditCount((n) => n + 1)}
           />
-          <NostrPanel file={selected} identity={identity} />
+          <NostrPanel
+            file={selected}
+            identity={identity}
+            setIdentity={setIdentity}
+          />
         </div>
       </div>
 
