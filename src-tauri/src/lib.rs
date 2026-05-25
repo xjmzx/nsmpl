@@ -269,6 +269,59 @@ fn gain_audio(src: String, gain: f64) -> Result<String, String> {
     Ok(dst_str)
 }
 
+/// Match the source's length to `target_duration` seconds. If the
+/// source is shorter, append silence (apad); if longer, trim from
+/// 0..target_duration via stream-copy. If already matched within
+/// 1 ms, returns an error so the caller can show a friendly message.
+/// Output: `{stem}-match.{ext}` next to source.
+#[tauri::command]
+fn match_length_audio(
+    src: String,
+    target_duration: f64,
+) -> Result<String, String> {
+    if !target_duration.is_finite() || target_duration <= 0.0 {
+        return Err(format!("invalid target duration: {target_duration}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let cur = probe_duration(&src)?;
+    let diff = target_duration - cur;
+    if diff.abs() < 0.001 {
+        return Err(format!(
+            "already matched (diff {:.1} ms)",
+            diff * 1000.0
+        ));
+    }
+    let dst = next_available_output_path(src_path, "match")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+    let res = if diff > 0.0 {
+        // pad end with the missing milliseconds
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-i", &src,
+            "-af", &format!("apad=pad_dur={diff:.6}"),
+            &dst_str,
+        ])
+    } else {
+        // trim down to target via stream-copy
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", "0",
+            "-to", &format!("{target_duration:.6}"),
+            "-i", &src,
+            "-c", "copy",
+            &dst_str,
+        ])
+    };
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
 /// Fade the end of the source out over `fade_duration` seconds AND
 /// append `tail_duration` seconds of pure silence — single ffmpeg
 /// pass chaining `afade=t=out` + `apad`. Useful for clean loop
@@ -805,6 +858,7 @@ pub fn run() {
             pad_start_audio,
             pad_end_audio,
             pad_at_audio,
+            match_length_audio,
             detect_bpm,
             get_identity,
             generate_identity,

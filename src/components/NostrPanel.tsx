@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   Copy,
   Eye,
   EyeOff,
@@ -232,24 +230,19 @@ export function NostrPanel({
     <KeyRound size={16} />
   );
 
-  const sectionTitle = (
-    <button
-      type="button"
-      onClick={() => setExpanded((p) => !p)}
-      aria-expanded={expanded}
-      className="inline-flex items-center gap-1.5 hover:opacity-70 transition-opacity"
-      title={expanded ? "Collapse publish panel" : "Expand publish panel"}
-    >
-      <span>Publish · Nostr</span>
-      {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-    </button>
-  );
+  const sectionTitle = "Publish";
+  const toggleExpanded = () => setExpanded((p) => !p);
 
   if (!expanded) {
     return (
-      <Section title={sectionTitle} icon={sectionIcon}>
+      <Section
+        title={sectionTitle}
+        icon={sectionIcon}
+        onTitleClick={toggleExpanded}
+        className="border-auburn/30 min-h-[5rem]"
+      >
         <p
-          className="text-xs text-muted truncate font-mono"
+          className="text-xs text-accent truncate font-mono"
           title={collapsedSummary}
         >
           {collapsedSummary}
@@ -263,7 +256,12 @@ export function NostrPanel({
   // (forget) — no inline identity block when signed in.
   if (!identity) {
     return (
-      <Section title={sectionTitle} icon={sectionIcon}>
+      <Section
+        title={sectionTitle}
+        icon={sectionIcon}
+        onTitleClick={toggleExpanded}
+        className="border-auburn/30"
+      >
         <p className="text-xs text-muted">
           ndisc.smpl signs publishes with a Nostr keypair. Generate a new
           identity or paste an existing nsec — your secret key is stored
@@ -322,7 +320,12 @@ export function NostrPanel({
   }
 
   return (
-    <Section title={sectionTitle} icon={<Radio size={16} />}>
+    <Section
+      title={sectionTitle}
+      icon={sectionIcon}
+      onTitleClick={toggleExpanded}
+      className="border-auburn/30"
+    >
       {/* ---- Relays ---- */}
       <div>
         <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
@@ -370,65 +373,84 @@ export function NostrPanel({
       </div>
 
       {/* ---- NIP-96 server ---- */}
-      <div>
+      <div className="mt-3">
         <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
           NIP-96 server
         </div>
-        <input
-          type="text"
-          value={endpoint}
-          onChange={(e) => setEndpoint(e.target.value)}
-          className="w-full px-3 py-1.5 rounded-md bg-surface text-fg
-                     placeholder:text-muted outline-none border border-transparent
-                     focus:border-accent/50 text-xs font-mono"
-          spellCheck={false}
-        />
+        {/* Same flex layout as the relay-add row so the input width
+            matches the relay-input width exactly (invisible "Add"
+            placeholder reserves the same trailing slot). */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
+            className="flex-1 px-3 py-1.5 rounded-md bg-surface text-fg
+                       placeholder:text-muted outline-none border border-transparent
+                       focus:border-accent/50 text-xs font-mono"
+            spellCheck={false}
+          />
+          <span
+            aria-hidden="true"
+            className="invisible px-3 py-1.5 text-xs"
+          >
+            Add
+          </span>
+        </div>
       </div>
 
-      {/* ---- Title ---- */}
-      <div>
+      {/* ---- Title + Publish (right-slot of the Title row replaces
+              the invisible-Add placeholder so the Publish button
+              sits in the same column as the Add button above). ---- */}
+      <div className="mt-3">
         <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
           Title
         </div>
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder={file ? file.name : "select a sample first"}
-          disabled={!file}
-          className="w-full px-3 py-1.5 rounded-md bg-surface text-fg
-                     placeholder:text-muted outline-none border border-transparent
-                     focus:border-accent/50 text-xs disabled:opacity-50"
-        />
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={file ? file.name : "select a sample first"}
+            disabled={!file}
+            className="flex-1 px-3 py-1.5 rounded-md bg-surface text-fg
+                       placeholder:text-muted outline-none border border-transparent
+                       focus:border-accent/50 text-xs disabled:opacity-50"
+          />
+          <button
+            onClick={handlePublish}
+            disabled={!identity || !file || busy}
+            title={statusText}
+            aria-label="Publish to Nostr"
+            className={cn(
+              // Square, height matched to the other inputs/buttons
+              // in the panel (px-3 py-1.5 text-xs ⇒ ~28px tall).
+              "h-7 aspect-square rounded-md font-semibold shrink-0",
+              "flex items-center justify-center",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              status.kind === "ok"
+                ? "bg-ok/20 text-ok"
+                : status.kind === "err"
+                  ? "bg-alert/20 text-alert"
+                  : "bg-accent text-bg hover:opacity-90",
+            )}
+          >
+            {busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Upload size={14} />
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* ---- Publish (icon-only button + status caption alongside) ---- */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handlePublish}
-          disabled={!identity || !file || busy}
-          title={statusText}
-          aria-label="Publish to Nostr"
-          className={cn(
-            "w-20 px-3 py-2.5 rounded-md font-semibold shrink-0",
-            "flex items-center justify-center",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            status.kind === "ok"
-              ? "bg-ok/20 text-ok"
-              : status.kind === "err"
-                ? "bg-alert/20 text-alert"
-                : "bg-accent text-bg hover:opacity-90",
-          )}
-        >
-          {busy ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : (
-            <Upload size={16} />
-          )}
-        </button>
+      {/* Caption only when there's actually something to say.
+          The idle "Publish to Nostr" copy is suppressed — the
+          button + tooltip carry that meaning. */}
+      {statusText !== "Publish to Nostr" && (
         <p
           className={cn(
-            "text-xs min-w-0 truncate",
+            "mt-2 text-xs min-w-0 truncate",
             status.kind === "ok"
               ? "text-ok"
               : status.kind === "err"
@@ -441,7 +463,7 @@ export function NostrPanel({
         >
           {statusText}
         </p>
-      </div>
+      )}
 
       {status.kind === "err" && (
         <pre className="text-xs text-alert font-mono break-all whitespace-pre-wrap">

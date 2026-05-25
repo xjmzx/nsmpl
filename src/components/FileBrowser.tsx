@@ -23,6 +23,9 @@ interface FileBrowserProps {
   // this to restore persisted Track 1 / Track 2 selections once the
   // library is back.
   onListing?: (files: AudioFile[]) => void;
+  // Whole-panel collapse — when false, only the title bar renders.
+  expanded?: boolean;
+  onToggleExpand?: () => void;
 }
 
 const DIR_KEY = "smpl-tool.lib.dir";
@@ -81,6 +84,8 @@ export function FileBrowser({
   selected,
   reloadKey,
   onListing,
+  expanded = true,
+  onToggleExpand,
 }: FileBrowserProps) {
   const [dir, setDir] = useState(() => localStorage.getItem(DIR_KEY) ?? "");
   const [files, setFiles] = useState<AudioFile[]>([]);
@@ -172,7 +177,15 @@ export function FileBrowser({
   const noMatches = filterActive && sortedFiles.length === 0;
 
   return (
-    <Section title="Library" icon={<FolderOpen size={16} />}>
+    <Section
+      title="Library"
+      icon={<FolderOpen size={16} />}
+      onTitleClick={onToggleExpand}
+      elastic={expanded}
+      className={cn("border-digital/30", !expanded && "min-h-[5rem]")}
+    >
+      {!expanded ? null : (
+        <>
       <div className="flex gap-2">
         <input
           type="text"
@@ -243,7 +256,12 @@ export function FileBrowser({
         )}
       </div>
 
-      <div className="mt-1 rounded-md bg-bg/50 overflow-hidden flex flex-col">
+      {/* flex-1 lets this block fill the section's elastic children
+          area when the column has spare height. min-h floor keeps it
+          from collapsing below a few rows; max-h caps it at ~10
+          visible rows (header + rows), beyond which the file list
+          inside scrolls. */}
+      <div className="mt-1 rounded-md bg-bg/50 overflow-hidden flex flex-col flex-1 min-h-[10rem] max-h-[20rem]">
         <div
           className={cn(
             GRID_CLS,
@@ -268,7 +286,7 @@ export function FileBrowser({
           />
         </div>
 
-        <ul className="max-h-40 overflow-auto divide-y divide-surface/60">
+        <ul className="flex-1 min-h-0 overflow-auto divide-y divide-surface/60">
           {sortedFiles.length === 0 && !loading && !error && (
             <li className="px-3 py-3 text-muted text-xs">
               {files.length === 0
@@ -301,6 +319,8 @@ export function FileBrowser({
           ))}
         </ul>
       </div>
+        </>
+      )}
     </Section>
   );
 }

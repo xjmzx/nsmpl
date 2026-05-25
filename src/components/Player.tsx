@@ -8,9 +8,8 @@ import {
 import {
   ArrowLeftToLine,
   ArrowRightToLine,
-  ChevronDown,
-  ChevronRight,
   Crop,
+  Equal,
   Gauge,
   Loader2,
   Pause,
@@ -37,6 +36,7 @@ import {
   fadeOutAudio,
   fadeTailAudio,
   gainAudio,
+  matchLengthAudio,
   padAtAudio,
   padEndAudio,
   padStartAudio,
@@ -78,6 +78,11 @@ interface PlayerProps {
   // the deck pair can shrink down to two compact lines + master strip.
   expanded?: boolean;
   onToggleExpand?: () => void;
+  // Counterpart track's file duration (seconds) and label — used by
+  // the "Match" edit button to length-match this track to the other.
+  // null when there's no other visible track or it has no file loaded.
+  otherDuration?: number | null;
+  otherLabel?: string;
 }
 
 // Density-dependent classNames + waveform pixel height. Slim is the
@@ -109,7 +114,8 @@ type EditMode =
   | "fadetail"
   | "padstart"
   | "padend"
-  | "padmid";
+  | "padmid"
+  | "match";
 
 /// Imperative handle exposed to App for the "master" between-tracks
 /// strip. Each fans out to one Player; the bare audio path already
@@ -244,6 +250,8 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     editsExpanded = false,
     expanded = true,
     onToggleExpand,
+    otherDuration = null,
+    otherLabel,
   },
   ref,
 ) {
@@ -406,6 +414,21 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       onEdited?.(path);
     } catch (e) {
       setEditStatus({ kind: "err", mode: "fadetail", msg: String(e) });
+    } finally {
+      setEditBusy(null);
+    }
+  }
+
+  async function runMatch() {
+    if (!file || editBusy || otherDuration == null) return;
+    setEditBusy("match");
+    setEditStatus(null);
+    try {
+      const path = await matchLengthAudio(file.path, otherDuration);
+      setEditStatus({ kind: "ok", mode: "match", path });
+      onEdited?.(path);
+    } catch (e) {
+      setEditStatus({ kind: "err", mode: "match", msg: String(e) });
     } finally {
       setEditBusy(null);
     }
@@ -676,7 +699,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // Slim: filename folds into the title so the panel can skip the
   // separate "now loaded" row. Wide: bare "Track N" title.
   const trackText = `Track${label ? ` ${label}` : ""}`;
-  const titleContent =
+  const title =
     density === "slim" ? (
       <span className="flex items-baseline gap-2 min-w-0">
         <span className="shrink-0">{trackText}</span>
@@ -693,33 +716,20 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     ) : (
       <span>{trackText}</span>
     );
-  // Title is a chevron-toggle button when the parent wires a handler.
-  // Click bubbles through to the Section's onClick too, so the same
-  // click also focuses this track — useful when collapsed.
-  const title = onToggleExpand ? (
-    <button
-      type="button"
-      onClick={onToggleExpand}
-      aria-expanded={expanded}
-      title={expanded ? "Collapse track" : "Expand track"}
-      className="inline-flex items-center gap-1.5 min-w-0 hover:opacity-70 transition-opacity"
-    >
-      {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      {titleContent}
-    </button>
-  ) : (
-    titleContent
-  );
 
   return (
     <Section
       title={title}
       icon={<Play size={16} />}
       onClick={onFocus}
+      onTitleClick={onToggleExpand}
       className={cn(
         D.section,
+        "border-mauve/30",
         onFocus && "cursor-pointer",
         focused && "ring-2 ring-accent/40",
+        // Uniform collapsed height across every panel.
+        !expanded && "min-h-[5rem]",
       )}
     >
       {expanded && (
@@ -822,26 +832,30 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         </div>
 
         {regionRange && (
-          <div
-            className="ml-2 px-2 py-1 rounded-md bg-bg/50 text-[10px] font-mono
-                       text-fg/80 flex items-center gap-1.5"
-            title="active loop region"
+          // Entire chip is clickable to clear — bigger hit area
+          // than the tiny X alone. Hover tints the readout alert so
+          // the destructive intent is visible before clicking.
+          <button
+            type="button"
+            onClick={clearRegion}
+            title="Click anywhere on this chip to clear the loop region"
+            aria-label="Clear loop region"
+            className="group ml-2 px-2 py-1 rounded-md bg-bg/50 hover:bg-alert/10
+                       text-[10px] font-mono text-fg/80 flex items-center gap-1.5
+                       transition-colors cursor-pointer"
           >
-            <span className="text-muted">region</span>
+            <span className="text-muted group-hover:text-alert/80">region</span>
             <span>{fmtSecs(regionRange.start)}</span>
-            <span className="text-muted">→</span>
+            <span className="text-muted group-hover:text-alert/80">→</span>
             <span>{fmtSecs(regionRange.end)}</span>
-            <span className="text-muted">
+            <span className="text-muted group-hover:text-alert/80">
               ({fmtSecs(regionRange.end - regionRange.start)})
             </span>
-            <button
-              onClick={clearRegion}
-              className="ml-1 text-muted hover:text-alert"
-              title="Clear region"
-            >
-              <X size={11} />
-            </button>
-          </div>
+            <X
+              size={13}
+              className="ml-1 text-muted group-hover:text-alert"
+            />
+          </button>
         )}
 
         {/* BPM detection chip: click to detect on the current region
@@ -1265,6 +1279,38 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               Pad here
             </button>
           </div>
+
+          {/* Match — one-click length-match to the OTHER track. Pads
+              if shorter, trims if longer, no-ops if equal. Disabled
+              when there isn't another track with a known duration. */}
+          <button
+            onClick={runMatch}
+            disabled={
+              !file || editBusy !== null || otherDuration == null
+            }
+            title={
+              editBusy === "match"
+                ? "Matching length…"
+                : !file
+                  ? "Load a sample first"
+                  : otherDuration == null
+                    ? "No other track to match against"
+                    : `Match this track's length to Track ${otherLabel} (${otherDuration.toFixed(3)}s) — pads or trims as needed`
+            }
+            className={cn(
+              D.btn,
+              "rounded-md bg-surface hover:bg-surfaceHover",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              "flex items-center gap-1.5 text-fg",
+            )}
+          >
+            {editBusy === "match" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Equal size={14} />
+            )}
+            Match T{otherLabel ?? "?"}
+          </button>
         </div>
       )}
 

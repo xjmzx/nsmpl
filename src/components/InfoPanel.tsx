@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Info } from "lucide-react";
+import { Info } from "lucide-react";
 import { Section } from "./Section";
 import type { AudioFile, AudioInfo } from "../lib/tauri";
 import { cn } from "../lib/cn";
@@ -78,27 +78,15 @@ export function InfoPanel({ file, audioInfo }: InfoPanelProps) {
         .filter(Boolean)
         .join(" · ");
 
-  const title = (
-    <button
-      type="button"
-      onClick={() => setExpanded((p) => !p)}
-      aria-expanded={expanded}
-      className="inline-flex items-center gap-1.5 hover:opacity-70 transition-opacity"
-      title={expanded ? "Collapse sample details" : "Expand sample details"}
-    >
-      <span>Sample</span>
-      {expanded ? (
-        <ChevronDown size={12} />
-      ) : (
-        <ChevronRight size={12} />
-      )}
-    </button>
-  );
-
   return (
-    <Section title={title} icon={<Info size={16} />}>
+    <Section
+      title="Sample"
+      icon={<Info size={16} />}
+      onTitleClick={() => setExpanded((p) => !p)}
+      className={cn("border-accent/30", !expanded && "min-h-[5rem]")}
+    >
       {!expanded ? (
-        <p className="text-xs text-muted truncate" title={summary ?? ""}>
+        <p className="text-xs text-accent truncate" title={summary ?? ""}>
           {file
             ? audioInfo
               ? summary

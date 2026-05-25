@@ -132,3 +132,13 @@ export async function padAtAudio(
 ): Promise<string> {
   return invoke<string>("pad_at_audio", { src, position, duration });
 }
+
+/// Match the source's length to `targetDuration` seconds — pad-end
+/// if shorter, trim if longer. Writes `{stem}-match.{ext}` next to
+/// the source. Errors if already matched within 1 ms.
+export async function matchLengthAudio(
+  src: string,
+  targetDuration: number,
+): Promise<string> {
+  return invoke<string>("match_length_audio", { src, targetDuration });
+}

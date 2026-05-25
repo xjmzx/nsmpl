@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   AudioWaveform,
+  Box,
   Disc3,
   KeyRound,
   Lock,
@@ -19,6 +20,7 @@ import { FileBrowser } from "./components/FileBrowser";
 // surface. Identity for the everyday flow now lives in NostrPanel
 // (logged-out view) and the header KeyRound chip (logged-in forget).
 import { Player, type PlayerHandle } from "./components/Player";
+import { Section } from "./components/Section";
 import { clearIdentity } from "./lib/nostr";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
@@ -31,6 +33,8 @@ const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
 const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
 const TRACK_EXPANDED_KEY = "smpl-tool.tracks.expanded";
 const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
+const LIBRARY_EXPANDED_KEY = "smpl-tool.library.expanded";
+const AUX_EXPANDED_KEY = "smpl-tool.aux.expanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
 type Density = "slim" | "wide";
@@ -120,6 +124,19 @@ export default function App() {
   const [editsExpanded, setEditsExpanded] = useState<boolean>(
     () => localStorage.getItem(EDITS_EXPANDED_KEY) === "1",
   );
+  const [libraryExpanded, setLibraryExpanded] = useState<boolean>(
+    // Default true on a fresh install; user can collapse mid-session.
+    () => localStorage.getItem(LIBRARY_EXPANDED_KEY) !== "0",
+  );
+  useEffect(() => {
+    localStorage.setItem(LIBRARY_EXPANDED_KEY, libraryExpanded ? "1" : "0");
+  }, [libraryExpanded]);
+  const [auxExpanded, setAuxExpanded] = useState<boolean>(
+    () => localStorage.getItem(AUX_EXPANDED_KEY) !== "0",
+  );
+  useEffect(() => {
+    localStorage.setItem(AUX_EXPANDED_KEY, auxExpanded ? "1" : "0");
+  }, [auxExpanded]);
   const [trackExpanded, setTrackExpanded] =
     useState<TrackPair<boolean>>(loadTrackExpanded);
   function toggleTrackExpanded(i: TrackIdx) {
@@ -199,6 +216,50 @@ export default function App() {
   }
   const anyPlaying =
     trackPlaying[0] || (tracksVisible === 2 && trackPlaying[1]);
+
+  // ---- Master stopwatch ------------------------------------------
+  // Accumulates seconds while any track is playing; held value when
+  // paused/stopped; reset to 0 on master Cue. rAF-driven for sub-
+  // frame smoothness, refs for the timing book-keeping so React
+  // doesn't re-render on every tick.
+  const [masterTime, setMasterTime] = useState(0);
+  const masterRafRef = useRef(0);
+  const masterAccumRef = useRef(0);
+  const masterStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (anyPlaying) {
+      if (masterStartedAtRef.current === null) {
+        masterStartedAtRef.current = performance.now();
+        const tick = () => {
+          if (masterStartedAtRef.current === null) return;
+          const elapsed =
+            masterAccumRef.current +
+            (performance.now() - masterStartedAtRef.current) / 1000;
+          setMasterTime(elapsed);
+          masterRafRef.current = requestAnimationFrame(tick);
+        };
+        masterRafRef.current = requestAnimationFrame(tick);
+      }
+    } else if (masterStartedAtRef.current !== null) {
+      masterAccumRef.current +=
+        (performance.now() - masterStartedAtRef.current) / 1000;
+      masterStartedAtRef.current = null;
+      cancelAnimationFrame(masterRafRef.current);
+      masterRafRef.current = 0;
+    }
+    return () => {
+      if (masterRafRef.current) cancelAnimationFrame(masterRafRef.current);
+    };
+  }, [anyPlaying]);
+  function resetMasterTimer() {
+    if (masterStartedAtRef.current !== null) {
+      cancelAnimationFrame(masterRafRef.current);
+      masterStartedAtRef.current = null;
+      masterRafRef.current = 0;
+    }
+    masterAccumRef.current = 0;
+    setMasterTime(0);
+  }
   async function handleForgetIdentity() {
     if (
       !confirm(
@@ -229,6 +290,7 @@ export default function App() {
     player1Ref.current?.stop();
   }
   function cueBoth() {
+    resetMasterTimer();
     player0Ref.current?.cue();
     player1Ref.current?.cue();
   }
@@ -300,9 +362,9 @@ export default function App() {
   }, [identity?.pk]);
 
   return (
-    <div className="min-h-screen p-6 max-w-[1400px] mx-auto flex flex-col gap-4">
+    <div className="min-h-screen p-6 max-w-[1500px] mx-auto flex flex-col gap-4">
       <header className="rounded-lg bg-panel border border-surface/60 px-4 py-3
-                         flex items-center gap-4">
+                         grid grid-cols-[1fr_auto_1fr] items-center gap-4">
         <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
@@ -331,9 +393,9 @@ export default function App() {
           )}
         </div>
 
-        {/* Publish spec — sits next to the title/version on the left.
-            ml-auto on the selectors group pushes them to the right
-            edge so the spec doesn't have to span the full width. */}
+        {/* Publish spec — sits in the centre column of the 3-col
+            grid (1fr_auto_1fr), so it's true-centred against the
+            full header width regardless of the side widths. */}
         <div
           className="hidden md:flex items-center min-w-0
                      text-xs leading-snug whitespace-nowrap overflow-hidden"
@@ -354,11 +416,10 @@ export default function App() {
           <span className="font-mono text-accent shrink-0">NIP-96</span>
         </div>
 
-        {/* View + tracks selectors — far right, height matches the version
-            chip. Square buttons with rounded corners, ndisc-styled.
-            ml-auto pushes this whole group to the right edge so the
-            publish spec on the left doesn't have to fill the gap. */}
-        <div className="hidden md:flex items-center gap-2 shrink-0 ml-auto">
+        {/* View + tracks selectors — right column of the header grid.
+            justify-self-end pins them to the right edge of their
+            grid track. */}
+        <div className="hidden md:flex items-center gap-2 shrink-0 justify-self-end">
           <Segmented
             label="wave"
             icon={<AudioWaveform size={14} />}
@@ -415,19 +476,42 @@ export default function App() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 items-stretch">
-        {/* Left column: library on top, sample info below. `content-start`
-            keeps rows intrinsic-height (same pattern as the right column)
-            so any leftover column height ends up below the last card,
-            not as empty space inside one. */}
-        <div className="grid grid-cols-1 gap-4 content-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-2 items-stretch">
+        {/* Left column: Library (elastic — grows into spare column
+            height when adjacent panels collapse or when the right
+            column is taller) on top, Sample info below (intrinsic
+            height). Flex column with h-full so it can stretch into
+            the items-stretch row from the outer grid. */}
+        <div className="flex flex-col gap-4 h-full min-h-0">
           <FileBrowser
             onSelect={loadIntoFocused}
             selected={focusedFile}
             reloadKey={editCount}
             onListing={handleListing}
+            expanded={libraryExpanded}
+            onToggleExpand={() => setLibraryExpanded((p) => !p)}
           />
           <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
+          {/* aux — placeholder panel that sits visually opposite
+              Publish in the right column. min-h only applies when
+              expanded so collapsing shrinks the panel to just its
+              title (like every other collapsible). */}
+          <Section
+            title="aux"
+            icon={<Box size={16} />}
+            onTitleClick={() => setAuxExpanded((p) => !p)}
+            className={
+              auxExpanded
+                ? "border-muted/40 min-h-[20rem]"
+                : "border-muted/40 min-h-[5rem]"
+            }
+          >
+            {auxExpanded && (
+              <p className="text-xs text-muted/60 italic">
+                placeholder — no function wired yet
+              </p>
+            )}
+          </Section>
         </div>
 
         {/* Right column: two tracks + publish. FileBrowser clicks load
@@ -449,12 +533,17 @@ export default function App() {
             editsExpanded={editsExpanded}
             expanded={trackExpanded[0]}
             onToggleExpand={() => toggleTrackExpanded(0)}
+            otherDuration={
+              tracksVisible === 2 ? audioInfos[1]?.duration ?? null : null
+            }
+            otherLabel="2"
           />
           {tracksVisible === 2 && (
             <>
               <MasterStrip
                 playing={anyPlaying}
                 density={density}
+                time={masterTime}
                 onTogglePlay={togglePlayBoth}
                 onStop={stopBoth}
                 onCue={cueBoth}
@@ -472,6 +561,8 @@ export default function App() {
                 editsExpanded={editsExpanded}
                 expanded={trackExpanded[1]}
                 onToggleExpand={() => toggleTrackExpanded(1)}
+                otherDuration={audioInfos[0]?.duration ?? null}
+                otherLabel="1"
               />
             </>
           )}
@@ -484,58 +575,72 @@ export default function App() {
       </div>
 
       <footer className="rounded-lg bg-panel border border-surface/60 px-4 py-2
-                         flex flex-wrap items-center justify-between
-                         gap-x-8 gap-y-1 text-xs text-muted">
-        <span>stack: Tauri 2 + React + TS + Tailwind</span>
+                         grid grid-cols-3 items-center gap-4
+                         text-xs text-muted">
+        <span className="truncate">stack: Tauri 2 + React + TS + Tailwind</span>
 
-        {/* Centered identity chip — same 3-chip pattern as ndisc /
-            ndisc.blobtree. */}
-        {identity ? (
-          <span className="inline-flex items-center gap-2 min-w-0">
-            {(profile?.display_name || profile?.name) && (
-              <span className="text-fg/80 truncate">
-                {profile?.display_name || profile?.name}
+        {/* Identity chip — centered slot in the 3-column footer
+            grid. justify-self-center keeps the chip true-centered
+            even though the right column is now empty (stack on the
+            left has narrower content than nothing on the right
+            would otherwise allow under justify-between flex). */}
+        <span className="justify-self-center min-w-0">
+          {identity ? (
+            <span className="inline-flex items-center gap-2 min-w-0">
+              {(profile?.display_name || profile?.name) && (
+                <span className="text-fg/80 truncate">
+                  {profile?.display_name || profile?.name}
+                </span>
+              )}
+              <span className="font-mono text-mauve" title={identity.npub}>
+                {shortNpub(identity.npub)}
               </span>
-            )}
-            <span className="font-mono text-mauve" title={identity.npub}>
-              {shortNpub(identity.npub)}
+              <span
+                className="inline-flex items-center gap-1 text-ok"
+                title="signed in · nsec stored in OS keychain (libsecret on Linux)"
+              >
+                <Lock size={11} />
+                <span>nsec stored in keychain</span>
+              </span>
             </span>
+          ) : (
             <span
-              className="inline-flex items-center gap-1 text-ok"
-              title="signed in · nsec stored in OS keychain (libsecret on Linux)"
+              className="inline-flex items-center gap-1.5 text-muted/80"
+              title="No key in the OS keychain for this build. Load or generate one in the Publish panel."
             >
-              <Lock size={11} />
-              <span>nsec stored in keychain</span>
+              <KeyRound size={11} className="opacity-60" />
+              <span>not signed in · no key in keychain</span>
             </span>
-          </span>
-        ) : (
-          <span
-            className="inline-flex items-center gap-1.5 text-muted/80"
-            title="No key in the OS keychain for this build. Load or generate one in the Identity panel."
-          >
-            <KeyRound size={11} className="opacity-60" />
-            <span>not signed in · no key in keychain</span>
-          </span>
-        )}
+          )}
+        </span>
 
-        {/* Right-edge spacer — keeps the identity chip visually
-            centered in the footer without showing the focused-track
-            filename (which already lives in each Track's title). */}
-        <span className="opacity-0">·</span>
+        {/* Right column placeholder — keeps the 3-col grid balanced
+            without inserting visible filler. */}
+        <span aria-hidden="true" />
+
       </footer>
     </div>
   );
 }
 
+function fmtMasterTime(t: number): string {
+  if (!isFinite(t) || t < 0) return "0:00.000";
+  const m = Math.floor(t / 60);
+  const s = t - m * 60;
+  return `${m}:${s.toFixed(3).padStart(6, "0")}`;
+}
+
 function MasterStrip({
   playing,
   density,
+  time,
   onCue,
   onTogglePlay,
   onStop,
 }: {
   playing: boolean;
   density: Density;
+  time: number;
   onCue: () => void;
   onTogglePlay: () => void;
   onStop: () => void;
@@ -543,20 +648,22 @@ function MasterStrip({
   // Match the per-Track transport chip padding so master + track
   // buttons align horizontally row to row.
   const btn = density === "slim" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2";
-  // Horizontal padding only — outer container matches the Track
-  // Section's left/right padding so the buttons align column-to-
-  // column with the per-track transport chip, but no extra
-  // top/bottom thickness around the strip.
-  const outerPad = density === "slim" ? "px-3" : "px-4";
-  // Inter-button gap restored — Cue / Play-Pause / Stop are separate
-  // rounded chips with a small space between, instead of one fused
-  // segmented chip.
+  // Card padding mirrors Section's (p-3 slim, p-4 wide) so the
+  // buttons inside the master card sit at the same x as the
+  // per-track transport chip inside its Section.
+  const cardPad = density === "slim" ? "p-3" : "p-4";
+  // Colours reversed from before: dark fill, mauve glyph (was
+  // mauve fill, dark glyph). Sits inside a full-width card that
+  // matches the Section card chrome rather than the old extending
+  // thin bar.
   const masterBtn =
     btn +
-    " rounded-md bg-mauve text-bg hover:bg-mauve/80 transition-colors" +
+    " rounded-md bg-surface text-mauve hover:bg-mauve/15 transition-colors" +
     " flex items-center justify-center";
   return (
-    <div className={`flex items-center gap-3 ${outerPad}`}>
+    <div
+      className={`rounded-xl bg-panel border border-ok/30 shadow-md ${cardPad} flex items-center justify-between gap-3 min-h-[5rem]`}
+    >
       <div className="inline-flex gap-1">
         <button
           type="button"
@@ -591,13 +698,15 @@ function MasterStrip({
           <Square size={14} fill="currentColor" />
         </button>
       </div>
-      {/* Visible bar extending out from the buttons — muted so it
-          doesn't compete with the mauve chip; flex-1 so it takes
-          whatever horizontal space is left. */}
-      <div
-        aria-hidden="true"
-        className="flex-1 h-1.5 bg-surface/70 rounded-full"
-      />
+      {/* Master stopwatch — accumulates while any track is playing,
+          holds value on pause/stop, resets to 0 on Cue. tabular-nums
+          stops digit jitter as the rAF ticks. */}
+      <span
+        className="font-mono text-ok tabular-nums text-xs"
+        title="Master time — running while any track is playing; resets to 0 on Cue."
+      >
+        {fmtMasterTime(time)}
+      </span>
     </div>
   );
 }
