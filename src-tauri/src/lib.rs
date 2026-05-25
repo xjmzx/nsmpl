@@ -92,10 +92,10 @@ async fn read_audio_file(path: String) -> Result<Response, String> {
     Ok(Response::new(data))
 }
 
-/// Resolve the first non-colliding sibling for `{stem}-trim.{ext}` (or
-/// `-trim-2`, `-trim-3`, …) so repeated trims of the same source don't
+/// Resolve the first non-colliding sibling for `{stem}-{tag}.{ext}` (or
+/// `-{tag}-2`, `-{tag}-3`, …) so repeated edits of the same source don't
 /// overwrite each other.
-fn next_available_trim_path(src: &Path) -> Result<PathBuf, String> {
+fn next_available_output_path(src: &Path, tag: &str) -> Result<PathBuf, String> {
     let dir = src.parent().ok_or("source has no parent directory")?;
     let stem = src
         .file_stem()
@@ -107,17 +107,71 @@ fn next_available_trim_path(src: &Path) -> Result<PathBuf, String> {
     } else {
         format!(".{ext}")
     };
-    let base = dir.join(format!("{stem}-trim{suffix}"));
+    let base = dir.join(format!("{stem}-{tag}{suffix}"));
     if !base.exists() {
         return Ok(base);
     }
     for n in 2..10_000 {
-        let p = dir.join(format!("{stem}-trim-{n}{suffix}"));
+        let p = dir.join(format!("{stem}-{tag}-{n}{suffix}"));
         if !p.exists() {
             return Ok(p);
         }
     }
-    Err("too many trim outputs in this folder".into())
+    Err(format!("too many {tag} outputs in this folder"))
+}
+
+/// Run an ffmpeg invocation, surfacing the stderr tail on failure and a
+/// friendly hint if the binary is missing.
+fn run_ffmpeg(args: &[&str]) -> Result<(), String> {
+    let output = Command::new("ffmpeg")
+        .args(args)
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "ffmpeg not found on PATH — install ffmpeg to enable edits".to_string()
+            } else {
+                format!("ffmpeg launch failed: {e}")
+            }
+        })?;
+    if !output.status.success() {
+        return Err(format!(
+            "ffmpeg failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+/// Probe a source file's duration in seconds via ffprobe. Needed by
+/// prune to decide whether the region touches a file boundary.
+fn probe_duration(src: &str) -> Result<f64, String> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            src,
+        ])
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "ffprobe not found on PATH — install ffmpeg to enable edits".to_string()
+            } else {
+                format!("ffprobe launch failed: {e}")
+            }
+        })?;
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    s.parse::<f64>()
+        .map_err(|e| format!("could not parse duration '{s}': {e}"))
 }
 
 /// Trim a source audio file to `[start, end]` seconds via ffmpeg
@@ -134,44 +188,169 @@ fn trim_audio(src: String, start: f64, end: f64) -> Result<String, String> {
     if !src_path.is_file() {
         return Err(format!("not a file: {src}"));
     }
-    let dst = next_available_trim_path(src_path)?;
+    let dst = next_available_output_path(src_path, "trim")?;
     let dst_str = dst.to_string_lossy().into_owned();
 
     // -ss before -i = fast input seek (per-format-accurate, no full re-read).
     // -c copy keeps the original codec/quality.
-    let output = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            &format!("{start:.6}"),
-            "-to",
-            &format!("{end:.6}"),
-            "-i",
-            &src,
-            "-c",
-            "copy",
-            &dst_str,
-        ])
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "ffmpeg not found on PATH — install ffmpeg to enable trim".to_string()
-            } else {
-                format!("ffmpeg launch failed: {e}")
-            }
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let res = run_ffmpeg(&[
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        &format!("{start:.6}"),
+        "-to",
+        &format!("{end:.6}"),
+        "-i",
+        &src,
+        "-c",
+        "copy",
+        &dst_str,
+    ]);
+    if let Err(e) = res {
         // Best-effort cleanup if ffmpeg created a zero-byte file on failure.
         let _ = fs::remove_file(&dst);
-        return Err(format!("ffmpeg failed: {}", stderr.trim()));
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
+/// Delete `[start, end]` from a source audio file, splicing the
+/// remainder via ffmpeg's concat demuxer (stream-copy throughout). Same
+/// quality contract as trim: sample-accurate on WAV/AIFF, frame-accurate
+/// on FLAC, packet-boundary on lossy codecs (lossy splices may show
+/// audible glitches at the join). Output is `{stem}-prune.{ext}` next
+/// to the source (auto-suffixed on collision).
+#[tauri::command]
+fn prune_audio(src: String, start: f64, end: f64) -> Result<String, String> {
+    if !start.is_finite() || !end.is_finite() || start < 0.0 || end <= start {
+        return Err(format!("invalid prune range: start={start}, end={end}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dur = probe_duration(&src)?;
+    if end > dur + 0.001 {
+        return Err(format!(
+            "region end {end:.3}s exceeds file duration {dur:.3}s"
+        ));
+    }
+    let dst = next_available_output_path(src_path, "prune")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+
+    // Treat sub-millisecond gaps to the file boundaries as the boundary
+    // itself, so a region snapped to start/end falls back to a single
+    // trim and skips the concat plumbing.
+    let eps = 0.001;
+    let has_a = start > eps;
+    let has_b = (dur - end) > eps;
+
+    if !has_a && !has_b {
+        return Err("prune region covers the whole file — nothing left".into());
     }
 
+    let res = if !has_a {
+        // Region begins at file start — equivalent to keeping [end..dur].
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", &format!("{end:.6}"),
+            "-to", &format!("{dur:.6}"),
+            "-i", &src,
+            "-c", "copy",
+            &dst_str,
+        ])
+    } else if !has_b {
+        // Region ends at file end — equivalent to keeping [0..start].
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-to", &format!("{start:.6}"),
+            "-i", &src,
+            "-c", "copy",
+            &dst_str,
+        ])
+    } else {
+        prune_concat(&src, src_path, start, end, &dst_str)
+    };
+
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
     Ok(dst_str)
+}
+
+/// Two-segment splice: emit A=[0..start] and B=[end..eof] to temp files,
+/// then concat them via the demuxer (all stream-copy). Temps are
+/// cleaned up on every exit path.
+fn prune_concat(
+    src: &str,
+    src_path: &Path,
+    start: f64,
+    end: f64,
+    dst: &str,
+) -> Result<(), String> {
+    let ext = src_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let ext_suffix = if ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{ext}")
+    };
+    let temp_dir = std::env::temp_dir();
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seg_a = temp_dir.join(format!("smpl-prune-{stamp}-a{ext_suffix}"));
+    let seg_b = temp_dir.join(format!("smpl-prune-{stamp}-b{ext_suffix}"));
+    let list = temp_dir.join(format!("smpl-prune-{stamp}.txt"));
+
+    let result = (|| -> Result<(), String> {
+        let seg_a_str = seg_a.to_str().ok_or("temp path not utf-8")?;
+        let seg_b_str = seg_b.to_str().ok_or("temp path not utf-8")?;
+        let list_str = list.to_str().ok_or("list path not utf-8")?;
+
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-to", &format!("{start:.6}"),
+            "-i", src,
+            "-c", "copy",
+            seg_a_str,
+        ])?;
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", &format!("{end:.6}"),
+            "-i", src,
+            "-c", "copy",
+            seg_b_str,
+        ])?;
+        let list_body = format!(
+            "file '{}'\nfile '{}'\n",
+            escape_concat_path(&seg_a.to_string_lossy()),
+            escape_concat_path(&seg_b.to_string_lossy()),
+        );
+        fs::write(&list, &list_body).map_err(|e| format!("write concat list: {e}"))?;
+        run_ffmpeg(&[
+            "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", list_str,
+            "-c", "copy",
+            dst,
+        ])
+    })();
+
+    let _ = fs::remove_file(&seg_a);
+    let _ = fs::remove_file(&seg_b);
+    let _ = fs::remove_file(&list);
+    result
+}
+
+/// Escape a path for ffmpeg's concat demuxer (single-quoted entries):
+/// `\` → `\\` and `'` → `'\''`. Other chars pass through unchanged.
+fn escape_concat_path(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "'\\''")
 }
 
 // ---- nostr identity (OS keychain) -------------------------------------
@@ -281,6 +460,7 @@ pub fn run() {
             list_audio_files,
             read_audio_file,
             trim_audio,
+            prune_audio,
             get_identity,
             generate_identity,
             import_identity,

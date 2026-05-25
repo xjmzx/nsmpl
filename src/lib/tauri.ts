@@ -31,3 +31,15 @@ export async function trimAudio(
 ): Promise<string> {
   return invoke<string>("trim_audio", { src, start, end });
 }
+
+/// Delete [start, end] from `src` and splice the remainder via ffmpeg's
+/// concat demuxer (stream-copy). Writes `{stem}-prune.{ext}` next to
+/// the source (auto-suffixed on collision) and resolves to the absolute
+/// output path.
+export async function pruneAudio(
+  src: string,
+  start: number,
+  end: number,
+): Promise<string> {
+  return invoke<string>("prune_audio", { src, start, end });
+}

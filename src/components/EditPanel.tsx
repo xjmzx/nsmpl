@@ -1,76 +1,96 @@
 import { useState } from "react";
-import { Crop, Loader2 } from "lucide-react";
+import { Crop, Loader2, Scissors, Wand2 } from "lucide-react";
 import { Section } from "./Section";
-import { trimAudio, type AudioFile } from "../lib/tauri";
+import { pruneAudio, trimAudio, type AudioFile } from "../lib/tauri";
 
 interface EditPanelProps {
   file: AudioFile | null;
   region: { start: number; end: number } | null;
-  // Fired with the absolute output path after a successful trim, so the
+  // Fired with the absolute output path after a successful edit, so the
   // parent can refresh the file browser to surface the new file.
-  onTrimmed?: (path: string) => void;
+  onEdited?: (path: string) => void;
 }
 
 function fmt(t: number): string {
   return `${t.toFixed(2)}s`;
 }
 
-type Status = { kind: "ok"; path: string } | { kind: "err"; msg: string };
+type Mode = "trim" | "prune";
+type Status =
+  | { kind: "ok"; mode: Mode; path: string }
+  | { kind: "err"; mode: Mode; msg: string };
 
-export function EditPanel({ file, region, onTrimmed }: EditPanelProps) {
-  const [busy, setBusy] = useState(false);
+export function EditPanel({ file, region, onEdited }: EditPanelProps) {
+  const [busy, setBusy] = useState<Mode | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
   const length = region ? region.end - region.start : 0;
   const ready = !!file && !!region && length > 0;
 
-  async function onTrim() {
+  async function run(mode: Mode) {
     if (!ready || !file || !region) return;
-    setBusy(true);
+    setBusy(mode);
     setStatus(null);
     try {
-      const path = await trimAudio(file.path, region.start, region.end);
-      setStatus({ kind: "ok", path });
-      onTrimmed?.(path);
+      const fn = mode === "trim" ? trimAudio : pruneAudio;
+      const path = await fn(file.path, region.start, region.end);
+      setStatus({ kind: "ok", mode, path });
+      onEdited?.(path);
     } catch (e) {
-      setStatus({ kind: "err", msg: String(e) });
+      setStatus({ kind: "err", mode, msg: String(e) });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
-  const buttonTitle = busy
-    ? "Trimming…"
-    : !file
-      ? "Load a sample first"
-      : !region
-        ? "Drag a loop region on the waveform to set the trim range"
-        : `Trim ${fmt(region.start)} → ${fmt(region.end)} (${fmt(length)}) and save next to source`;
+  function titleFor(mode: Mode): string {
+    if (busy === mode) return mode === "trim" ? "Trimming…" : "Pruning…";
+    if (!file) return "Load a sample first";
+    if (!region) return "Drag a loop region on the waveform first";
+    if (mode === "trim") {
+      return `Keep ${fmt(region.start)} → ${fmt(region.end)} (${fmt(length)}) and save next to source`;
+    }
+    return `Delete ${fmt(region.start)} → ${fmt(region.end)} (${fmt(length)}) and save the remainder next to source`;
+  }
 
   return (
-    <Section title="Edit" icon={<Crop size={16} />}>
+    <Section title="Edit" icon={<Wand2 size={16} />}>
       <p className="text-xs text-muted">
-        Trim the loaded sample to the loop range. Stream-copy via ffmpeg
-        (sample-accurate on WAV/AIFF, frame-accurate on FLAC,
-        near-packet-boundary on lossy formats). Saves next to the source
-        as <span className="font-mono">…-trim.ext</span>.
+        Trim to the loop region, or delete the loop region (keep the rest).
+        Stream-copy via ffmpeg — sample-accurate on WAV/AIFF, frame-accurate
+        on FLAC, near-packet-boundary on lossy. Saves next to the source.
       </p>
 
       <div className="flex items-center gap-3 flex-wrap">
         <button
-          onClick={onTrim}
-          disabled={!ready || busy}
-          title={buttonTitle}
+          onClick={() => run("trim")}
+          disabled={!ready || busy !== null}
+          title={titleFor("trim")}
           className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
                      text-fg flex items-center justify-center gap-1.5
                      disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {busy ? (
+          {busy === "trim" ? (
             <Loader2 size={14} className="animate-spin" />
           ) : (
             <Crop size={14} />
           )}
-          {busy ? "Trimming…" : "Trim to region"}
+          {busy === "trim" ? "Trimming…" : "Trim to region"}
+        </button>
+        <button
+          onClick={() => run("prune")}
+          disabled={!ready || busy !== null}
+          title={titleFor("prune")}
+          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
+                     text-fg flex items-center justify-center gap-1.5
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {busy === "prune" ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Scissors size={14} />
+          )}
+          {busy === "prune" ? "Pruning…" : "Delete region"}
         </button>
 
         {region && (

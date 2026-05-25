@@ -36,9 +36,10 @@ export default function App() {
   const [regionRange, setRegionRange] = useState<
     { start: number; end: number } | null
   >(null);
-  // Bumped after each successful trim — drives FileBrowser to re-list
-  // the current dir so the new file surfaces without a manual refresh.
-  const [trimCount, setTrimCount] = useState(0);
+  // Bumped after each successful edit (trim/prune) — drives FileBrowser
+  // to re-list the current dir so the new file surfaces without a
+  // manual refresh.
+  const [editCount, setEditCount] = useState(0);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [profile, setProfile] = useState<ProfileMeta | null>(null);
   const [theme, setTheme] = useState<Theme>(loadTheme);
@@ -144,7 +145,7 @@ export default function App() {
           <FileBrowser
             onSelect={setSelected}
             selected={selected}
-            reloadKey={trimCount}
+            reloadKey={editCount}
           />
           <InfoPanel
             identity={identity}
@@ -164,7 +165,7 @@ export default function App() {
           <EditPanel
             file={selected}
             region={regionRange}
-            onTrimmed={() => setTrimCount((n) => n + 1)}
+            onEdited={() => setEditCount((n) => n + 1)}
           />
           <NostrPanel file={selected} identity={identity} />
         </div>
