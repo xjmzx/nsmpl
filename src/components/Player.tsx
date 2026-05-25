@@ -6,6 +6,10 @@ import {
   useState,
 } from "react";
 import {
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  ChevronDown,
+  ChevronRight,
   Crop,
   Gauge,
   Loader2,
@@ -14,6 +18,7 @@ import {
   Repeat,
   Scissors,
   SkipBack,
+  Split,
   Square,
   TrendingDown,
   TrendingUp,
@@ -24,12 +29,17 @@ import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, {
   type Region,
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
+import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
 import { Section } from "./Section";
 import {
   detectBpm,
   fadeInAudio,
   fadeOutAudio,
+  fadeTailAudio,
   gainAudio,
+  padAtAudio,
+  padEndAudio,
+  padStartAudio,
   pruneAudio,
   readAudioFile,
   trimAudio,
@@ -44,6 +54,10 @@ interface PlayerProps {
   // Fired with the absolute output path after a successful trim/prune
   // so the parent can refresh the file browser.
   onEdited?: (path: string) => void;
+  // Notifies the parent whenever this track's playing state flips,
+  // so the master between-tracks strip can show play vs. pause based
+  // on aggregate state across both decks.
+  onPlayingChange?: (playing: boolean) => void;
   // Optional label appended to "Track" in the header (e.g. "1", "2").
   // Omitted = bare "Track" title (single-player mode).
   label?: string;
@@ -60,6 +74,10 @@ interface PlayerProps {
   // collapsed — the deck-first UX keeps transport prominent and edits
   // out of the way.
   editsExpanded?: boolean;
+  // Whole-track collapse. When false, only the title row renders so
+  // the deck pair can shrink down to two compact lines + master strip.
+  expanded?: boolean;
+  onToggleExpand?: () => void;
 }
 
 // Density-dependent classNames + waveform pixel height. Slim is the
@@ -67,19 +85,31 @@ interface PlayerProps {
 const DENSITY = {
   slim: {
     waveHeight: 56,
-    waveContainer: "rounded-md bg-bg/50 px-2 py-1.5 min-h-[72px]",
+    // Container holds the waveform (56px) + Timeline ruler (~14px) +
+    // py-1.5 padding (12px) → ~82px content. min-h gives the box a
+    // stable size before the wave decodes.
+    waveContainer: "rounded-md bg-bg/50 px-2 py-1.5 min-h-[90px]",
     section: "p-3 gap-2",
     btn: "px-2.5 py-1.5 text-xs",
   },
   wide: {
     waveHeight: 80,
-    waveContainer: "rounded-md bg-bg/50 px-2 py-2 min-h-[96px]",
+    waveContainer: "rounded-md bg-bg/50 px-2 py-2 min-h-[114px]",
     section: "", // Section defaults (p-4 gap-3) apply.
     btn: "px-3 py-2",
   },
 } as const;
 
-type EditMode = "trim" | "prune" | "gain" | "fadein" | "fadeout";
+type EditMode =
+  | "trim"
+  | "prune"
+  | "gain"
+  | "fadein"
+  | "fadeout"
+  | "fadetail"
+  | "padstart"
+  | "padend"
+  | "padmid";
 
 /// Imperative handle exposed to App for the "master" between-tracks
 /// strip. Each fans out to one Player; the bare audio path already
@@ -87,6 +117,7 @@ type EditMode = "trim" | "prune" | "gain" | "fadein" | "fadeout";
 /// mixer combines them at the speakers).
 export type PlayerHandle = {
   play: () => void;
+  pause: () => void;
   stop: () => void;
   cue: () => void;
 };
@@ -114,14 +145,16 @@ function mimeFor(name: string): string {
 }
 
 function fmt(t: number): string {
-  if (!isFinite(t) || t < 0) return "0:00";
+  if (!isFinite(t) || t < 0) return "0:00.000";
   const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  const s = t - m * 60;
+  // padStart(6, "0") ensures the seconds slot is SS.mmm so sub-10s
+  // values still render as 0X.YYY rather than X.YYY.
+  return `${m}:${s.toFixed(3).padStart(6, "0")}`;
 }
 
 function fmtSecs(t: number): string {
-  return `${t.toFixed(2)}s`;
+  return `${t.toFixed(3)}s`;
 }
 
 const WAVE = "#6c7086";
@@ -129,20 +162,86 @@ const PROGRESS = "#89b4fa";
 const CURSOR = "#cdd6f4";
 const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 
+// Three-tier grid stacked via multiple background-images. Major
+// (brightest) ticks read at a glance; minor (faintest) give
+// fine subdivision. Tiers adapt to duration so short clips get
+// sub-second detail and long clips don't turn into a wall.
+//
+// 1 ms steps are pixel-impossible at any normal zoom (≪1px/ms);
+// 100 ms is the floor for the finest visible tier.
+type GridTier = { interval: number; opacity: number };
+function gridTiersFor(duration: number): GridTier[] {
+  if (duration <= 0) return [];
+  if (duration < 5) {
+    return [
+      { interval: 1, opacity: 0.7 },
+      { interval: 0.5, opacity: 0.35 },
+      { interval: 0.1, opacity: 0.15 },
+    ];
+  }
+  if (duration < 30) {
+    return [
+      { interval: 5, opacity: 0.7 },
+      { interval: 1, opacity: 0.35 },
+      { interval: 0.5, opacity: 0.15 },
+    ];
+  }
+  if (duration < 120) {
+    return [
+      { interval: 10, opacity: 0.7 },
+      { interval: 5, opacity: 0.35 },
+      { interval: 1, opacity: 0.15 },
+    ];
+  }
+  return [
+    { interval: 60, opacity: 0.7 },
+    { interval: 10, opacity: 0.35 },
+    { interval: 5, opacity: 0.15 },
+  ];
+}
+function gridGradient(duration: number): string {
+  const tiers = gridTiersFor(duration);
+  if (tiers.length === 0) return "none";
+  // First listed = topmost in CSS painting order; major tier sits
+  // on top so it doesn't get washed out by the finer layers.
+  return tiers
+    .map((t) => {
+      const segments = Math.max(1, Math.round(duration / t.interval));
+      const pct = 100 / segments;
+      return (
+        `repeating-linear-gradient(to right, ` +
+        `rgba(108, 112, 134, ${t.opacity}) 0, ` +
+        `rgba(108, 112, 134, ${t.opacity}) 1px, ` +
+        `transparent 1px, transparent ${pct}%)`
+      );
+    })
+    .join(", ");
+}
+
 // Min sample / region length aubio gets a fair shot at — anything
 // shorter is just a hit, not a beat pattern.
 const BPM_MIN_DURATION = 5; // seconds
+
+// Master switch for the BPM-detection chip. Flip to true to wake the
+// click handler; left disabled while the median-of-intervals math is
+// too octave-confused on most real-world samples (see memory:
+// project_smpl_audio_backlog). Chip stays visible as a placeholder so
+// the feature isn't lost from view.
+const BPM_DETECTION_ENABLED = false;
 
 export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   {
     file,
     onAudioInfo,
     onEdited,
+    onPlayingChange,
     label,
     focused,
     onFocus,
     density = "slim",
     editsExpanded = false,
+    expanded = true,
+    onToggleExpand,
   },
   ref,
 ) {
@@ -180,6 +279,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     loopRef.current = loop;
   }, [loop]);
 
+  // Bubble playing flips to the parent. Ref-piped so an unstable
+  // parent callback doesn't re-fire the effect.
+  const onPlayingChangeRef = useRef(onPlayingChange);
+  onPlayingChangeRef.current = onPlayingChange;
+  useEffect(() => {
+    onPlayingChangeRef.current?.(playing);
+  }, [playing]);
+
   // ---- edit (trim / prune / gain) ---------------------------------
   const [editBusy, setEditBusy] = useState<EditMode | null>(null);
   const [editStatus, setEditStatus] = useState<EditStatus | null>(null);
@@ -187,6 +294,8 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   const [gainDb, setGainDb] = useState(0);
   // Shared fade duration (seconds) for both fade-in and fade-out.
   const [fadeDur, setFadeDur] = useState(1.0);
+  // Shared pad duration (seconds) for start/end/at-region inserts.
+  const [padDur, setPadDur] = useState(1.0);
 
   // ---- BPM detection (aubio) --------------------------------------
   // Cleared when the source file changes OR when the loop region's
@@ -244,7 +353,9 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // applies — playback refuses or goes silent. Setting
   // HTMLMediaElement.volume directly via WaveSurfer.setVolume is
   // bypass-safe and gives us a master attenuator per track (0..1).
-  const [volume, setVolume] = useState(1);
+  // Default to 0.5 on every launch so a relaunch never blasts at
+  // whatever level was last set — session-only, not persisted.
+  const [volume, setVolume] = useState(0.5);
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
   useEffect(() => {
@@ -278,6 +389,40 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       onEdited?.(path);
     } catch (e) {
       setEditStatus({ kind: "err", mode: direction, msg: String(e) });
+    } finally {
+      setEditBusy(null);
+    }
+  }
+
+  async function runFadeTail() {
+    if (!file || editBusy) return;
+    setEditBusy("fadetail");
+    setEditStatus(null);
+    try {
+      const path = await fadeTailAudio(file.path, fadeDur, padDur);
+      setEditStatus({ kind: "ok", mode: "fadetail", path });
+      onEdited?.(path);
+    } catch (e) {
+      setEditStatus({ kind: "err", mode: "fadetail", msg: String(e) });
+    } finally {
+      setEditBusy(null);
+    }
+  }
+
+  async function runPad(mode: "padstart" | "padend" | "padmid") {
+    if (!file || editBusy) return;
+    if (mode === "padmid" && !regionRange) return;
+    setEditBusy(mode);
+    setEditStatus(null);
+    try {
+      let path: string;
+      if (mode === "padstart") path = await padStartAudio(file.path, padDur);
+      else if (mode === "padend") path = await padEndAudio(file.path, padDur);
+      else path = await padAtAudio(file.path, regionRange!.start, padDur);
+      setEditStatus({ kind: "ok", mode, path });
+      onEdited?.(path);
+    } catch (e) {
+      setEditStatus({ kind: "err", mode, msg: String(e) });
     } finally {
       setEditBusy(null);
     }
@@ -350,6 +495,17 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     setLoading(true);
 
     const regions = RegionsPlugin.create();
+    // Timeline ruler under the waveform — auto-spacing based on
+    // duration; styled small + muted so it doesn't compete with the
+    // wave for attention.
+    const timeline = TimelinePlugin.create({
+      height: 14,
+      insertPosition: "afterend",
+      style: {
+        fontSize: "10px",
+        color: WAVE,
+      },
+    });
     const ws = WaveSurfer.create({
       container: containerRef.current,
       waveColor: WAVE,
@@ -361,7 +517,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       barGap: 1,
       barRadius: 2,
       normalize: true,
-      plugins: [regions],
+      plugins: [regions, timeline],
     });
     wsRef.current = ws;
     regionsRef.current = regions;
@@ -502,7 +658,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // Expose the transport to the App-level "master" strip. Closures
   // read wsRef.current at call time, so the handle stays correct
   // across file loads.
-  useImperativeHandle(ref, () => ({ play, stop, cue }), []);
+  useImperativeHandle(ref, () => ({ play, pause, stop, cue }), []);
 
   function toggleLoop() {
     setLoop((p) => !p);
@@ -518,7 +674,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // Slim: filename folds into the title so the panel can skip the
   // separate "now loaded" row. Wide: bare "Track N" title.
   const trackText = `Track${label ? ` ${label}` : ""}`;
-  const title =
+  const titleContent =
     density === "slim" ? (
       <span className="flex items-baseline gap-2 min-w-0">
         <span className="shrink-0">{trackText}</span>
@@ -533,8 +689,25 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         )}
       </span>
     ) : (
-      trackText
+      <span>{trackText}</span>
     );
+  // Title is a chevron-toggle button when the parent wires a handler.
+  // Click bubbles through to the Section's onClick too, so the same
+  // click also focuses this track — useful when collapsed.
+  const title = onToggleExpand ? (
+    <button
+      type="button"
+      onClick={onToggleExpand}
+      aria-expanded={expanded}
+      title={expanded ? "Collapse track" : "Expand track"}
+      className="inline-flex items-center gap-1.5 min-w-0 hover:opacity-70 transition-opacity"
+    >
+      {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      {titleContent}
+    </button>
+  ) : (
+    titleContent
+  );
 
   return (
     <Section
@@ -547,6 +720,8 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         focused && "ring-2 ring-accent/40",
       )}
     >
+      {expanded && (
+        <>
       {density === "wide" && (
         <div className="text-xs text-muted truncate">
           {file ? file.name : "No sample loaded"}
@@ -554,7 +729,22 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       )}
 
       <div className="space-y-1">
-        <div ref={containerRef} className={D.waveContainer} />
+        <div className="relative">
+          <div ref={containerRef} className={D.waveContainer} />
+          {duration > 0 && (
+            <div
+              aria-hidden="true"
+              className={cn(
+                "absolute inset-x-2 pointer-events-none",
+                density === "slim" ? "top-1.5" : "top-2",
+              )}
+              style={{
+                height: `${D.waveHeight}px`,
+                backgroundImage: gridGradient(duration),
+              }}
+            />
+          )}
+        </div>
         <div className="flex justify-between text-[10px] text-muted font-mono">
           <span>{fmt(time)}</span>
           <span>
@@ -574,50 +764,60 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         </pre>
       )}
 
-      {/* Transport row — always visible. Deck-first layout: playback,
-          region readout, volume, loop. */}
+      {/* Transport row — always visible. Cue/Play/Stop grouped as a
+          single outline chip so its shape matches the solid-fill
+          MasterStrip between tracks; icon-only inside, tooltips carry
+          the labels. */}
       <div className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={cue}
-          disabled={!file || loading}
-          title="Cue — pause and return playhead to the start of the file"
-          aria-label="Cue to start"
+        <div
           className={cn(
-            D.btn,
-            "rounded-md bg-surface hover:bg-surfaceHover",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center justify-center text-fg",
+            "inline-flex rounded-md overflow-hidden border border-surface",
+            (!file || loading) && "opacity-50",
           )}
         >
-          <SkipBack size={14} />
-        </button>
-        <button
-          onClick={playing ? pause : play}
-          disabled={!file || loading}
-          className={cn(
-            D.btn,
-            "rounded-md bg-surface hover:bg-surfaceHover",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center justify-center gap-1.5 text-fg",
-            // Fixed width so toggling Play ↔ Pause doesn't shift the row.
-            "min-w-[5rem]",
-          )}
-        >
-          {playing ? <Pause size={14} /> : <Play size={14} />}
-          {playing ? "Pause" : "Play"}
-        </button>
-        <button
-          onClick={stop}
-          disabled={!file || loading}
-          className={cn(
-            D.btn,
-            "rounded-md bg-surface hover:bg-surfaceHover",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center gap-1.5 text-fg",
-          )}
-        >
-          <Square size={14} /> Stop
-        </button>
+          <button
+            onClick={cue}
+            disabled={!file || loading}
+            title="Cue — pause and return playhead to the start of the file"
+            aria-label="Cue to start"
+            className={cn(
+              D.btn,
+              "text-fg hover:bg-surface/60 transition-colors",
+              "disabled:cursor-not-allowed",
+              "flex items-center justify-center",
+            )}
+          >
+            <SkipBack size={14} />
+          </button>
+          <button
+            onClick={playing ? pause : play}
+            disabled={!file || loading}
+            title={playing ? "Pause" : "Play"}
+            aria-label={playing ? "Pause" : "Play"}
+            className={cn(
+              D.btn,
+              "border-l border-surface text-fg hover:bg-surface/60",
+              "transition-colors disabled:cursor-not-allowed",
+              "flex items-center justify-center",
+            )}
+          >
+            {playing ? <Pause size={14} /> : <Play size={14} />}
+          </button>
+          <button
+            onClick={stop}
+            disabled={!file || loading}
+            title="Stop — pause and return to region start (or 0)"
+            aria-label="Stop"
+            className={cn(
+              D.btn,
+              "border-l border-surface text-fg hover:bg-surface/60",
+              "transition-colors disabled:cursor-not-allowed",
+              "flex items-center justify-center",
+            )}
+          >
+            <Square size={14} />
+          </button>
+        </div>
 
         {regionRange && (
           <div
@@ -654,19 +854,23 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           return (
             <button
               onClick={runDetectBpm}
-              disabled={!file || bpmBusy || tooShort}
+              disabled={
+                !BPM_DETECTION_ENABLED || !file || bpmBusy || tooShort
+              }
               title={
-                bpmBusy
-                  ? "Detecting BPM…"
-                  : tooShort
-                    ? `${regionRange ? "Region" : "Sample"} shorter than ${BPM_MIN_DURATION}s — too little material for a stable BPM estimate`
-                    : bpmError
-                      ? `BPM detection failed: ${bpmError}`
-                      : !file
-                        ? "Load a sample first"
-                        : bpm
-                          ? `BPM (${regionRange ? "region" : "file"}): ${bpm.toFixed(2)} — click to redetect`
-                          : `Detect BPM (${regionRange ? "region" : "whole file"})`
+                !BPM_DETECTION_ENABLED
+                  ? "BPM detection — experimental, currently disabled. The median-of-intervals math drifts on most real-world samples (octave-confused). Refinement queued in project memory."
+                  : bpmBusy
+                    ? "Detecting BPM…"
+                    : tooShort
+                      ? `${regionRange ? "Region" : "Sample"} shorter than ${BPM_MIN_DURATION}s — too little material for a stable BPM estimate`
+                      : bpmError
+                        ? `BPM detection failed: ${bpmError}`
+                        : !file
+                          ? "Load a sample first"
+                          : bpm
+                            ? `BPM (${regionRange ? "region" : "file"}): ${bpm.toFixed(2)} — click to redetect`
+                            : `Detect BPM (${regionRange ? "region" : "whole file"})`
               }
               className={cn(
                 "px-2 py-1 rounded-md bg-bg/50 hover:bg-surface/60",
@@ -927,6 +1131,137 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               )}
               Fade out
             </button>
+            <button
+              onClick={runFadeTail}
+              disabled={!file || editBusy !== null}
+              title={
+                editBusy === "fadetail"
+                  ? "Fading + tailing…"
+                  : !file
+                    ? "Load a sample first"
+                    : `Fade out over ${fadeDur.toFixed(2)}s, then append ${padDur.toFixed(2)}s of silence — uses the fade slider (here) for the fade and the pad slider for the tail`
+              }
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "fadetail" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <TrendingDown size={14} />
+              )}
+              Fade+tail
+            </button>
+          </div>
+
+          {/* Pad: shared silence-duration slider + three apply buttons.
+              Pad start / Pad end work on the whole file; Pad here
+              inserts silence at region.start (disabled until a region
+              is set). */}
+          <div
+            className={cn(
+              "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
+              (!file || editBusy !== null) && "opacity-50",
+            )}
+            title={
+              !file
+                ? "Load a sample first"
+                : `Silence duration: ${padDur.toFixed(2)}s`
+            }
+          >
+            <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
+              <input
+                type="range"
+                min={0.05}
+                max={10}
+                step={0.05}
+                value={padDur}
+                onChange={(e) => setPadDur(parseFloat(e.target.value))}
+                disabled={!file || editBusy !== null}
+                aria-label="Pad silence duration in seconds"
+                className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
+              />
+              <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
+                {padDur.toFixed(2)}s
+              </span>
+            </div>
+            <button
+              onClick={() => runPad("padstart")}
+              disabled={!file || editBusy !== null}
+              title={
+                editBusy === "padstart"
+                  ? "Padding start…"
+                  : !file
+                    ? "Load a sample first"
+                    : `Prepend ${padDur.toFixed(2)}s of silence and save next to source`
+              }
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "padstart" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <ArrowLeftToLine size={14} />
+              )}
+              Pad start
+            </button>
+            <button
+              onClick={() => runPad("padend")}
+              disabled={!file || editBusy !== null}
+              title={
+                editBusy === "padend"
+                  ? "Padding end…"
+                  : !file
+                    ? "Load a sample first"
+                    : `Append ${padDur.toFixed(2)}s of silence and save next to source`
+              }
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "padend" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <ArrowRightToLine size={14} />
+              )}
+              Pad end
+            </button>
+            <button
+              onClick={() => runPad("padmid")}
+              disabled={!file || editBusy !== null || !regionRange}
+              title={
+                editBusy === "padmid"
+                  ? "Padding at region…"
+                  : !file
+                    ? "Load a sample first"
+                    : !regionRange
+                      ? "Drag a loop region first — silence is inserted at its start"
+                      : `Insert ${padDur.toFixed(2)}s of silence at ${fmtSecs(regionRange.start)} and save next to source`
+              }
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "padmid" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Split size={14} />
+              )}
+              Pad here
+            </button>
           </div>
         </div>
       )}
@@ -940,6 +1275,8 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         <pre className="text-xs text-alert font-mono break-all whitespace-pre-wrap">
           {editStatus.msg}
         </pre>
+      )}
+        </>
       )}
     </Section>
   );

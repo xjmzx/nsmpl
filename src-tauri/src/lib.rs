@@ -269,6 +269,148 @@ fn gain_audio(src: String, gain: f64) -> Result<String, String> {
     Ok(dst_str)
 }
 
+/// Fade the end of the source out over `fade_duration` seconds AND
+/// append `tail_duration` seconds of pure silence — single ffmpeg
+/// pass chaining `afade=t=out` + `apad`. Useful for clean loop
+/// tails of exact length. Output: `{stem}-fadetail.{ext}`.
+#[tauri::command]
+fn fade_tail_audio(
+    src: String,
+    fade_duration: f64,
+    tail_duration: f64,
+) -> Result<String, String> {
+    if !fade_duration.is_finite() || fade_duration <= 0.0 {
+        return Err(format!("invalid fade duration: {fade_duration}"));
+    }
+    if !tail_duration.is_finite() || tail_duration <= 0.0 {
+        return Err(format!("invalid tail duration: {tail_duration}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dur = probe_duration(&src)?;
+    if fade_duration >= dur {
+        return Err(format!(
+            "fade duration {fade_duration:.3}s ≥ file duration {dur:.3}s"
+        ));
+    }
+    let st = dur - fade_duration;
+    let dst = next_available_output_path(src_path, "fadetail")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-af", &format!(
+            "afade=t=out:st={st:.6}:d={fade_duration:.6},apad=pad_dur={tail_duration:.6}"
+        ),
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
+/// Prepend `duration` seconds of silence to the source via ffmpeg's
+/// `adelay` filter. `all=1` applies the same delay to every channel
+/// regardless of source layout. Output: `{stem}-padstart.{ext}`.
+#[tauri::command]
+fn pad_start_audio(src: String, duration: f64) -> Result<String, String> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(format!("invalid pad duration: {duration}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dst = next_available_output_path(src_path, "padstart")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+    let ms = (duration * 1000.0).round() as i64;
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-af", &format!("adelay={ms}:all=1"),
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
+/// Append `duration` seconds of silence to the source via ffmpeg's
+/// `apad` filter (whole_dur covers all channels automatically).
+/// Output: `{stem}-padend.{ext}`.
+#[tauri::command]
+fn pad_end_audio(src: String, duration: f64) -> Result<String, String> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(format!("invalid pad duration: {duration}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dst = next_available_output_path(src_path, "padend")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-af", &format!("apad=pad_dur={duration:.6}"),
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
+/// Insert `duration` seconds of silence at `position` in the source —
+/// split at position, adelay the second half by `duration`, concat
+/// the two via filter_complex in a single ffmpeg call. Output:
+/// `{stem}-padmid.{ext}`.
+#[tauri::command]
+fn pad_at_audio(
+    src: String,
+    position: f64,
+    duration: f64,
+) -> Result<String, String> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(format!("invalid pad duration: {duration}"));
+    }
+    if !position.is_finite() || position < 0.0 {
+        return Err(format!("invalid pad position: {position}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dst = next_available_output_path(src_path, "padmid")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+    let ms = (duration * 1000.0).round() as i64;
+    let filter = format!(
+        "[0:a]atrim=0:{position:.6},asetpts=PTS-STARTPTS[a];\
+         [0:a]atrim={position:.6},asetpts=PTS-STARTPTS,adelay={ms}:all=1[b];\
+         [a][b]concat=n=2:v=0:a=1[out]"
+    );
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-filter_complex", &filter,
+        "-map", "[out]",
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
 /// Detect tempo (BPM) via `aubio tempo`. If `start` and `end` are
 /// both provided, the region is extracted to a temp WAV first so the
 /// estimate reflects what the user is looping; otherwise the source
@@ -659,6 +801,10 @@ pub fn run() {
             gain_audio,
             fade_in_audio,
             fade_out_audio,
+            fade_tail_audio,
+            pad_start_audio,
+            pad_end_audio,
+            pad_at_audio,
             detect_bpm,
             get_identity,
             generate_identity,

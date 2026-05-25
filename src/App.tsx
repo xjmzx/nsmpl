@@ -1,5 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { KeyRound, Lock, Play, SkipBack, Sliders, Square } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  AudioWaveform,
+  Disc3,
+  KeyRound,
+  Lock,
+  Pause,
+  Play,
+  SkipBack,
+  Sliders,
+  Square,
+} from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
@@ -14,6 +24,7 @@ const THEME_KEY = "smpl-tool.theme";
 const DENSITY_KEY = "smpl-tool.density";
 const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
 const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
+const TRACK_EXPANDED_KEY = "smpl-tool.tracks.expanded";
 const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
@@ -26,6 +37,25 @@ function loadDensity(): Density {
 function loadTracksVisible(): TracksVisible {
   return localStorage.getItem(TRACKS_VISIBLE_KEY) === "1" ? 1 : 2;
 }
+function loadTrackExpanded(): [boolean, boolean] {
+  try {
+    const raw = localStorage.getItem(TRACK_EXPANDED_KEY);
+    if (!raw) return [true, true];
+    const parsed = JSON.parse(raw);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      typeof parsed[0] === "boolean" &&
+      typeof parsed[1] === "boolean"
+    ) {
+      return parsed as [boolean, boolean];
+    }
+  } catch {
+    /* fallthrough */
+  }
+  return [true, true];
+}
+
 function loadPersistedTrackPaths(): [string | null, string | null] {
   try {
     const raw = localStorage.getItem(TRACK_PATHS_KEY);
@@ -85,6 +115,15 @@ export default function App() {
   const [editsExpanded, setEditsExpanded] = useState<boolean>(
     () => localStorage.getItem(EDITS_EXPANDED_KEY) === "1",
   );
+  const [trackExpanded, setTrackExpanded] =
+    useState<TrackPair<boolean>>(loadTrackExpanded);
+  function toggleTrackExpanded(i: TrackIdx) {
+    setTrackExpanded((prev) => {
+      const next: TrackPair<boolean> = [...prev] as typeof prev;
+      next[i] = !next[i];
+      return next;
+    });
+  }
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -96,6 +135,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(EDITS_EXPANDED_KEY, editsExpanded ? "1" : "0");
   }, [editsExpanded]);
+  useEffect(() => {
+    localStorage.setItem(TRACK_EXPANDED_KEY, JSON.stringify(trackExpanded));
+  }, [trackExpanded]);
 
   // Persist current track file paths whenever they change.
   useEffect(() => {
@@ -137,9 +179,29 @@ export default function App() {
   // transport (play/stop/cue both at once).
   const player0Ref = useRef<PlayerHandle>(null);
   const player1Ref = useRef<PlayerHandle>(null);
-  function playBoth() {
-    player0Ref.current?.play();
-    player1Ref.current?.play();
+  // Aggregate playing state — drives the master Play/Pause toggle.
+  // A visible track's flip is reported via onPlayingChange.
+  const [trackPlaying, setTrackPlaying] = useState<TrackPair<boolean>>([
+    false,
+    false,
+  ]);
+  function setTrackPlayingFor(i: TrackIdx, p: boolean) {
+    setTrackPlaying((prev) => {
+      const next: TrackPair<boolean> = [...prev] as typeof prev;
+      next[i] = p;
+      return next;
+    });
+  }
+  const anyPlaying =
+    trackPlaying[0] || (tracksVisible === 2 && trackPlaying[1]);
+  function togglePlayBoth() {
+    if (anyPlaying) {
+      player0Ref.current?.pause();
+      player1Ref.current?.pause();
+    } else {
+      player0Ref.current?.play();
+      player1Ref.current?.play();
+    }
   }
   function stopBoth() {
     player0Ref.current?.stop();
@@ -248,10 +310,11 @@ export default function App() {
           )}
         </div>
 
-        {/* Publish spec — always visible, single line. Uses all the
-            horizontal space between the version chip and the selectors. */}
+        {/* Publish spec — sits next to the title/version on the left.
+            ml-auto on the selectors group pushes them to the right
+            edge so the spec doesn't have to span the full width. */}
         <div
-          className="hidden md:flex flex-1 items-center justify-end min-w-0
+          className="hidden md:flex items-center min-w-0
                      text-xs leading-snug whitespace-nowrap overflow-hidden"
         >
           <span className="text-mauve font-mono mr-2 shrink-0">Nostr</span>
@@ -271,10 +334,13 @@ export default function App() {
         </div>
 
         {/* View + tracks selectors — far right, height matches the version
-            chip. Square buttons with rounded corners, ndisc-styled. */}
-        <div className="hidden md:flex items-center gap-2 shrink-0">
+            chip. Square buttons with rounded corners, ndisc-styled.
+            ml-auto pushes this whole group to the right edge so the
+            publish spec on the left doesn't have to fill the gap. */}
+        <div className="hidden md:flex items-center gap-2 shrink-0 ml-auto">
           <Segmented
-            label="view"
+            label="wave"
+            icon={<AudioWaveform size={14} />}
             value={density}
             options={[
               { value: "slim", label: "slim" },
@@ -283,7 +349,8 @@ export default function App() {
             onChange={setDensity}
           />
           <Segmented
-            label="tracks"
+            label="decks"
+            icon={<Disc3 size={14} />}
             value={tracksVisible}
             options={[
               { value: 1, label: "1" },
@@ -343,13 +410,18 @@ export default function App() {
             onFocus={() => setFocused(0)}
             onAudioInfo={(i) => setAudioInfoFor(0, i)}
             onEdited={() => setEditCount((n) => n + 1)}
+            onPlayingChange={(p) => setTrackPlayingFor(0, p)}
             density={density}
             editsExpanded={editsExpanded}
+            expanded={trackExpanded[0]}
+            onToggleExpand={() => toggleTrackExpanded(0)}
           />
           {tracksVisible === 2 && (
             <>
               <MasterStrip
-                onPlay={playBoth}
+                playing={anyPlaying}
+                density={density}
+                onTogglePlay={togglePlayBoth}
                 onStop={stopBoth}
                 onCue={cueBoth}
               />
@@ -361,8 +433,11 @@ export default function App() {
                 onFocus={() => setFocused(1)}
                 onAudioInfo={(i) => setAudioInfoFor(1, i)}
                 onEdited={() => setEditCount((n) => n + 1)}
+                onPlayingChange={(p) => setTrackPlayingFor(1, p)}
                 density={density}
                 editsExpanded={editsExpanded}
+                expanded={trackExpanded[1]}
+                onToggleExpand={() => toggleTrackExpanded(1)}
               />
             </>
           )}
@@ -421,44 +496,52 @@ export default function App() {
 }
 
 function MasterStrip({
+  playing,
+  density,
   onCue,
-  onPlay,
+  onTogglePlay,
   onStop,
 }: {
+  playing: boolean;
+  density: Density;
   onCue: () => void;
-  onPlay: () => void;
+  onTogglePlay: () => void;
   onStop: () => void;
 }) {
+  // Match the per-Track transport chip padding so master + track
+  // buttons align horizontally row to row.
+  const btn = density === "slim" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2";
+  // Outer padding matches the Section padding (p-3 slim, p-4 wide) so
+  // the chip's left edge sits at the same x as the Track transport chip.
+  const outerPad = density === "slim" ? "px-3" : "px-4";
   return (
-    <div className="flex items-center justify-center gap-2 py-1">
-      <span className="text-[10px] uppercase tracking-wide text-muted font-mono">
-        master
-      </span>
-      <div className="inline-flex rounded-md overflow-hidden bg-surface">
+    <div className={`flex items-center gap-2 ${outerPad}`}>
+      <div className="inline-flex rounded-md overflow-hidden bg-mauve">
         <button
           type="button"
           onClick={onCue}
           title="Cue both — pause both tracks and seek to start"
           aria-label="Cue both tracks"
-          className="px-3 py-1.5 text-muted hover:bg-mauve/15 hover:text-mauve transition-colors"
+          className={`${btn} text-bg hover:bg-mauve/80 transition-colors flex items-center justify-center`}
         >
           <SkipBack size={14} />
         </button>
         <button
           type="button"
-          onClick={onPlay}
-          title="Play both tracks"
-          aria-label="Play both tracks"
-          className="px-3 py-1.5 border-l border-bg/40 text-muted hover:bg-mauve/15 hover:text-mauve transition-colors"
+          onClick={onTogglePlay}
+          title={playing ? "Pause both tracks" : "Play both tracks"}
+          aria-label={playing ? "Pause both tracks" : "Play both tracks"}
+          aria-pressed={playing}
+          className={`${btn} border-l border-bg/30 text-bg hover:bg-mauve/80 transition-colors flex items-center justify-center`}
         >
-          <Play size={14} />
+          {playing ? <Pause size={14} /> : <Play size={14} />}
         </button>
         <button
           type="button"
           onClick={onStop}
           title="Stop both tracks (pauses, returns each to its region start or 0)"
           aria-label="Stop both tracks"
-          className="px-3 py-1.5 border-l border-bg/40 text-muted hover:bg-mauve/15 hover:text-mauve transition-colors"
+          className={`${btn} border-l border-bg/30 text-bg hover:bg-mauve/80 transition-colors flex items-center justify-center`}
         >
           <Square size={14} />
         </button>
@@ -469,20 +552,34 @@ function MasterStrip({
 
 function Segmented<T extends string | number>({
   label,
+  icon,
   value,
   options,
   onChange,
 }: {
+  // `label` is used for tooltip + a11y; not rendered visibly when an
+  // icon prefix is supplied.
   label: string;
+  icon?: ReactNode;
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
 }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="hidden lg:inline text-muted/70 text-[10px] uppercase tracking-wide">
-        {label}
-      </span>
+      {icon ? (
+        <span
+          className="text-muted/70 inline-flex items-center"
+          title={label}
+          aria-label={label}
+        >
+          {icon}
+        </span>
+      ) : (
+        <span className="hidden lg:inline text-muted/70 text-[10px] uppercase tracking-wide">
+          {label}
+        </span>
+      )}
       <span className="inline-flex rounded-md overflow-hidden bg-surface">
         {options.map((opt, i) => (
           <button

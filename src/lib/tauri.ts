@@ -74,6 +74,21 @@ export async function fadeOutAudio(
   return invoke<string>("fade_out_audio", { src, duration });
 }
 
+/// Combined op: fade the end out over `fadeDuration` seconds AND
+/// append `tailDuration` seconds of pure silence. Writes
+/// `{stem}-fadetail.{ext}` next to the source.
+export async function fadeTailAudio(
+  src: string,
+  fadeDuration: number,
+  tailDuration: number,
+): Promise<string> {
+  return invoke<string>("fade_tail_audio", {
+    src,
+    fadeDuration,
+    tailDuration,
+  });
+}
+
 /// Detect BPM via `aubio tempo`. If `region` is supplied, that slice
 /// of the source is extracted to a temp WAV first so the estimate
 /// reflects the loop the user is auditioning. Resolves to the
@@ -87,4 +102,33 @@ export async function detectBpm(
     start: region?.start ?? null,
     end: region?.end ?? null,
   });
+}
+
+/// Prepend `duration` seconds of silence to the source. Writes
+/// `{stem}-padstart.{ext}` next to the source.
+export async function padStartAudio(
+  src: string,
+  duration: number,
+): Promise<string> {
+  return invoke<string>("pad_start_audio", { src, duration });
+}
+
+/// Append `duration` seconds of silence to the source. Writes
+/// `{stem}-padend.{ext}` next to the source.
+export async function padEndAudio(
+  src: string,
+  duration: number,
+): Promise<string> {
+  return invoke<string>("pad_end_audio", { src, duration });
+}
+
+/// Insert `duration` seconds of silence at `position` (seconds) in
+/// the source — split + adelay + concat in a single ffmpeg pass.
+/// Writes `{stem}-padmid.{ext}` next to the source.
+export async function padAtAudio(
+  src: string,
+  position: number,
+  duration: number,
+): Promise<string> {
+  return invoke<string>("pad_at_audio", { src, position, duration });
 }
