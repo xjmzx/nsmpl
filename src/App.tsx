@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, KeyRound, Lock } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
@@ -14,6 +14,7 @@ const THEME_KEY = "smpl-tool.theme";
 const DENSITY_KEY = "smpl-tool.density";
 const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
 const NIP_EXPANDED_KEY = "smpl-tool.nip.expanded";
+const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
 type Density = "slim" | "wide";
@@ -24,6 +25,24 @@ function loadDensity(): Density {
 }
 function loadTracksVisible(): TracksVisible {
   return localStorage.getItem(TRACKS_VISIBLE_KEY) === "1" ? 1 : 2;
+}
+function loadPersistedTrackPaths(): [string | null, string | null] {
+  try {
+    const raw = localStorage.getItem(TRACK_PATHS_KEY);
+    if (!raw) return [null, null];
+    const parsed = JSON.parse(raw);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      (typeof parsed[0] === "string" || parsed[0] === null) &&
+      (typeof parsed[1] === "string" || parsed[1] === null)
+    ) {
+      return parsed as [string | null, string | null];
+    }
+  } catch {
+    /* fallthrough */
+  }
+  return [null, null];
 }
 
 interface ProfileMeta {
@@ -77,6 +96,37 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(NIP_EXPANDED_KEY, nipExpanded ? "1" : "0");
   }, [nipExpanded]);
+
+  // Persist current track file paths whenever they change.
+  useEffect(() => {
+    const paths = [files[0]?.path ?? null, files[1]?.path ?? null];
+    localStorage.setItem(TRACK_PATHS_KEY, JSON.stringify(paths));
+  }, [files]);
+
+  // Restore Track 1/2 file selections on the first library listing.
+  // Skipped if either track is already populated (user picked
+  // something before the listing arrived, or restore already ran).
+  const persistedTrackPaths = useRef(loadPersistedTrackPaths());
+  const restoreTried = useRef(false);
+  function handleListing(listing: AudioFile[]) {
+    if (restoreTried.current) return;
+    if (files[0] || files[1]) {
+      restoreTried.current = true;
+      return;
+    }
+    const paths = persistedTrackPaths.current;
+    if (!paths[0] && !paths[1]) {
+      restoreTried.current = true;
+      return;
+    }
+    const byPath = new Map(listing.map((f) => [f.path, f] as const));
+    const restored: TrackPair<AudioFile | null> = [
+      paths[0] ? byPath.get(paths[0]) ?? null : null,
+      paths[1] ? byPath.get(paths[1]) ?? null : null,
+    ];
+    if (restored[0] || restored[1]) setFiles(restored);
+    restoreTried.current = true;
+  }
 
   function pickTracksVisible(n: TracksVisible) {
     setTracksVisible(n);
@@ -263,6 +313,7 @@ export default function App() {
             onSelect={loadIntoFocused}
             selected={focusedFile}
             reloadKey={editCount}
+            onListing={handleListing}
           />
           <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
           <IdentityPanel identity={identity} setIdentity={setIdentity} />

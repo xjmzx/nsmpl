@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -17,6 +17,10 @@ interface FileBrowserProps {
   // (used after a trim so the new file appears). Initial value 0 is
   // ignored so the browser doesn't reload before the user picks a dir.
   reloadKey?: number;
+  // Fired after every successful directory listing — the parent uses
+  // this to restore persisted Track 1 / Track 2 selections once the
+  // library is back.
+  onListing?: (files: AudioFile[]) => void;
 }
 
 const DIR_KEY = "smpl-tool.lib.dir";
@@ -70,12 +74,22 @@ function fmtModified(unixSec: number): string {
 // their values.
 const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem] gap-3 items-center";
 
-export function FileBrowser({ onSelect, selected, reloadKey }: FileBrowserProps) {
+export function FileBrowser({
+  onSelect,
+  selected,
+  reloadKey,
+  onListing,
+}: FileBrowserProps) {
   const [dir, setDir] = useState(() => localStorage.getItem(DIR_KEY) ?? "");
   const [files, setFiles] = useState<AudioFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<Sort>(loadSort);
+
+  // Ref-pipe onListing so an unstable parent callback doesn't re-fire
+  // the listing effect (or, in the worst case, cause an infinite loop).
+  const onListingRef = useRef(onListing);
+  onListingRef.current = onListing;
 
   async function loadDir(path: string) {
     if (!path) return;
@@ -86,6 +100,7 @@ export function FileBrowser({ onSelect, selected, reloadKey }: FileBrowserProps)
       setFiles(items);
       setDir(path);
       localStorage.setItem(DIR_KEY, path);
+      onListingRef.current?.(items);
     } catch (e) {
       setError(String(e));
       setFiles([]);
