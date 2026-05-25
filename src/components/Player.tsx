@@ -16,6 +16,7 @@ import RegionsPlugin, {
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { Section } from "./Section";
 import {
+  gainAudio,
   pruneAudio,
   readAudioFile,
   trimAudio,
@@ -61,7 +62,7 @@ const DENSITY = {
   },
 } as const;
 
-type EditMode = "trim" | "prune";
+type EditMode = "trim" | "prune" | "gain";
 type EditStatus =
   | { kind: "ok"; mode: EditMode; path: string }
   | { kind: "err"; mode: EditMode; msg: string };
@@ -144,9 +145,11 @@ export function Player({
     loopRef.current = loop;
   }, [loop]);
 
-  // ---- edit (trim / prune) -----------------------------------------
+  // ---- edit (trim / prune / gain) ---------------------------------
   const [editBusy, setEditBusy] = useState<EditMode | null>(null);
   const [editStatus, setEditStatus] = useState<EditStatus | null>(null);
+  // dB value the user wants to apply on the next "Gain" click.
+  const [gainDb, setGainDb] = useState(0);
 
   // Reset edit feedback when the user switches samples.
   useEffect(() => {
@@ -173,7 +176,23 @@ export function Player({
     wsRef.current?.setVolume(volume);
   }, [volume]);
 
-  async function runEdit(mode: EditMode) {
+  async function runGain() {
+    if (!file || editBusy) return;
+    setEditBusy("gain");
+    setEditStatus(null);
+    try {
+      const linear = Math.pow(10, gainDb / 20);
+      const path = await gainAudio(file.path, linear);
+      setEditStatus({ kind: "ok", mode: "gain", path });
+      onEdited?.(path);
+    } catch (e) {
+      setEditStatus({ kind: "err", mode: "gain", msg: String(e) });
+    } finally {
+      setEditBusy(null);
+    }
+  }
+
+  async function runEdit(mode: "trim" | "prune") {
     if (!file || !regionRange || editBusy) return;
     setEditBusy(mode);
     setEditStatus(null);
@@ -530,6 +549,56 @@ export function Player({
           )}
           Prune
         </button>
+
+        {/* Gain: dB input + apply button as a single compact widget. */}
+        <div
+          className={cn(
+            "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
+            (!file || editBusy !== null) && "opacity-50",
+          )}
+          title={
+            editBusy === "gain"
+              ? "Applying gain…"
+              : !file
+                ? "Load a sample first"
+                : `Apply ${gainDb >= 0 ? "+" : ""}${gainDb} dB and save next to source`
+          }
+        >
+          <input
+            type="number"
+            value={gainDb}
+            onChange={(e) =>
+              setGainDb(
+                Math.max(-24, Math.min(24, parseFloat(e.target.value) || 0)),
+              )
+            }
+            min={-24}
+            max={24}
+            step={0.5}
+            disabled={!file || editBusy !== null}
+            aria-label="Gain in dB"
+            className={cn(
+              "w-12 px-1.5 text-xs text-right bg-transparent text-fg",
+              "font-mono outline-none border-r border-bg/40",
+              "disabled:cursor-not-allowed",
+            )}
+          />
+          <button
+            onClick={runGain}
+            disabled={!file || editBusy !== null}
+            className={cn(
+              "px-2.5 text-xs flex items-center gap-1.5 text-fg",
+              "hover:bg-surfaceHover disabled:cursor-not-allowed",
+            )}
+          >
+            {editBusy === "gain" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Volume2 size={14} />
+            )}
+            Gain
+          </button>
+        </div>
 
         {regionRange && (
           <div

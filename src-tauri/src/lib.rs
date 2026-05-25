@@ -174,6 +174,36 @@ fn probe_duration(src: &str) -> Result<f64, String> {
         .map_err(|e| format!("could not parse duration '{s}': {e}"))
 }
 
+/// Apply a linear-gain factor to the whole source file via ffmpeg's
+/// `volume` filter. Requires a re-encode (codec can't stream-copy a
+/// per-sample scale), so the output keeps the source's codec via
+/// container-extension inference. Output is written next to the
+/// source as `{stem}-gain.{ext}` (auto-suffixed on collision).
+#[tauri::command]
+fn gain_audio(src: String, gain: f64) -> Result<String, String> {
+    if !gain.is_finite() || gain < 0.0 {
+        return Err(format!("invalid gain factor: {gain}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dst = next_available_output_path(src_path, "gain")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-af", &format!("volume={gain:.6}"),
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
 /// Trim a source audio file to `[start, end]` seconds via ffmpeg
 /// stream-copy. Sample-accurate on WAV/AIFF; frame-boundary accurate on
 /// FLAC; packet-boundary (~20ms) on lossy codecs. Output is written
@@ -461,6 +491,7 @@ pub fn run() {
             read_audio_file,
             trim_audio,
             prune_audio,
+            gain_audio,
             get_identity,
             generate_identity,
             import_identity,

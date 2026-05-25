@@ -43,3 +43,15 @@ export async function pruneAudio(
 ): Promise<string> {
   return invoke<string>("prune_audio", { src, start, end });
 }
+
+/// Apply a linear-gain factor to the whole file via ffmpeg's volume
+/// filter. `gain` is a linear multiplier (1.0 = unity, 0.5 ≈ -6 dB,
+/// 2.0 ≈ +6 dB). Writes `{stem}-gain.{ext}` next to the source
+/// (auto-suffixed on collision) and resolves to the absolute output
+/// path.
+export async function gainAudio(
+  src: string,
+  gain: number,
+): Promise<string> {
+  return invoke<string>("gain_audio", { src, gain });
+}
