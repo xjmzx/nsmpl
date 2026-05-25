@@ -200,10 +200,11 @@ export default function App() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 items-stretch">
-        {/* Left column: library on top, identity + sample info on bottom.
-            Library at 3fr / Info at 5fr ⇒ Library is ~25% shorter vs. an
-            even split (3/8 = 37.5% vs. 50%). */}
-        <div className="grid grid-cols-1 grid-rows-[minmax(0,3fr)_minmax(0,5fr)] gap-4 min-h-[640px]">
+        {/* Left column: library on top, sample info below. `content-start`
+            keeps rows intrinsic-height (same pattern as the right column)
+            so any leftover column height ends up below the last card,
+            not as empty space inside one. */}
+        <div className="grid grid-cols-1 gap-4 content-start">
           <FileBrowser
             onSelect={loadIntoFocused}
             selected={focusedFile}

@@ -214,7 +214,7 @@ export function FileBrowser({ onSelect, selected, reloadKey }: FileBrowserProps)
           />
         </div>
 
-        <ul className="max-h-72 overflow-auto divide-y divide-surface/60">
+        <ul className="max-h-64 overflow-auto divide-y divide-surface/60">
           {sortedFiles.length === 0 && !loading && !error && (
             <li className="px-3 py-3 text-muted text-xs">
               No directory loaded. Click Browse, or type a path and press Enter.

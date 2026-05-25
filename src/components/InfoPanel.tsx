@@ -1,7 +1,10 @@
-import { Info } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Info } from "lucide-react";
 import { Section } from "./Section";
 import type { AudioFile, AudioInfo } from "../lib/tauri";
 import { cn } from "../lib/cn";
+
+const EXPANDED_KEY = "smpl-tool.sample.expanded";
 
 const MIME_BY_EXT: Record<string, string> = {
   wav: "audio/wav",
@@ -42,17 +45,67 @@ function fmtDuration(s: number): string {
   return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
 }
 
+function fmtChannels(n: number): string {
+  if (n === 1) return "mono";
+  if (n === 2) return "stereo";
+  return `${n}-ch`;
+}
+
 interface InfoPanelProps {
   file: AudioFile | null;
   audioInfo: AudioInfo | null;
 }
 
 export function InfoPanel({ file, audioInfo }: InfoPanelProps) {
+  const [expanded, setExpanded] = useState(() =>
+    localStorage.getItem(EXPANDED_KEY) === "1",
+  );
+  useEffect(() => {
+    localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
+  }, [expanded]);
+
   const mime = file ? mimeFor(file.name) : null;
 
+  const summary = !file
+    ? null
+    : [
+        audioInfo && `${(audioInfo.sampleRate / 1000).toFixed(1)} kHz`,
+        audioInfo && fmtChannels(audioInfo.channels),
+        audioInfo && fmtDuration(audioInfo.duration),
+        fmtSize(file.size),
+        mime,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+  const title = (
+    <button
+      type="button"
+      onClick={() => setExpanded((p) => !p)}
+      aria-expanded={expanded}
+      className="inline-flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+      title={expanded ? "Collapse sample details" : "Expand sample details"}
+    >
+      <span>Sample</span>
+      {expanded ? (
+        <ChevronDown size={12} />
+      ) : (
+        <ChevronRight size={12} />
+      )}
+    </button>
+  );
+
   return (
-    <Section title="Sample" icon={<Info size={16} />} className="h-full">
-      {!file ? (
+    <Section title={title} icon={<Info size={16} />}>
+      {!expanded ? (
+        <p className="text-xs text-muted truncate" title={summary ?? ""}>
+          {file
+            ? audioInfo
+              ? summary
+              : `${summary} · decoding…`
+            : "Select a sample on the left."}
+        </p>
+      ) : !file ? (
         <p className="text-xs text-muted">Select a sample on the left.</p>
       ) : (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
@@ -67,16 +120,7 @@ export function InfoPanel({ file, audioInfo }: InfoPanelProps) {
                 label="rate"
                 value={`${(audioInfo.sampleRate / 1000).toFixed(1)} kHz`}
               />
-              <Row
-                label="channels"
-                value={
-                  audioInfo.channels === 1
-                    ? "mono"
-                    : audioInfo.channels === 2
-                      ? "stereo"
-                      : `${audioInfo.channels}-ch`
-                }
-              />
+              <Row label="channels" value={fmtChannels(audioInfo.channels)} />
               <Row label="duration" value={fmtDuration(audioInfo.duration)} />
             </>
           ) : (
