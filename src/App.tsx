@@ -33,6 +33,12 @@ function shortNpub(npub: string): string {
 export default function App() {
   const [selected, setSelected] = useState<AudioFile | null>(null);
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
+  const [regionRange, setRegionRange] = useState<
+    { start: number; end: number } | null
+  >(null);
+  // Bumped after each successful trim — drives FileBrowser to re-list
+  // the current dir so the new file surfaces without a manual refresh.
+  const [trimCount, setTrimCount] = useState(0);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [profile, setProfile] = useState<ProfileMeta | null>(null);
   const [theme, setTheme] = useState<Theme>(loadTheme);
@@ -135,7 +141,11 @@ export default function App() {
             Library at 3fr / Info at 5fr ⇒ Library is ~25% shorter vs. an
             even split (3/8 = 37.5% vs. 50%). */}
         <div className="grid grid-cols-1 grid-rows-[minmax(0,3fr)_minmax(0,5fr)] gap-4 min-h-[640px]">
-          <FileBrowser onSelect={setSelected} selected={selected} />
+          <FileBrowser
+            onSelect={setSelected}
+            selected={selected}
+            reloadKey={trimCount}
+          />
           <InfoPanel
             identity={identity}
             setIdentity={setIdentity}
@@ -146,8 +156,16 @@ export default function App() {
 
         {/* Right column: player, edit, publish */}
         <div className="grid grid-cols-1 gap-4">
-          <Player file={selected} onAudioInfo={setAudioInfo} />
-          <EditPanel />
+          <Player
+            file={selected}
+            onAudioInfo={setAudioInfo}
+            onRegionChange={setRegionRange}
+          />
+          <EditPanel
+            file={selected}
+            region={regionRange}
+            onTrimmed={() => setTrimCount((n) => n + 1)}
+          />
           <NostrPanel file={selected} identity={identity} />
         </div>
       </div>

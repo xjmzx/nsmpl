@@ -11,6 +11,10 @@ import { cn } from "../lib/cn";
 interface PlayerProps {
   file: AudioFile | null;
   onAudioInfo?: (info: AudioInfo | null) => void;
+  // Fired whenever the loop region changes (drag-set, resize, or cleared)
+  // so other panels (e.g. EditPanel's trim) can act on the same range the
+  // user is auditioning. Null on file switch and on region removal.
+  onRegionChange?: (range: { start: number; end: number } | null) => void;
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -48,7 +52,7 @@ const PROGRESS = "#89b4fa";
 const CURSOR = "#cdd6f4";
 const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 
-export function Player({ file, onAudioInfo }: PlayerProps) {
+export function Player({ file, onAudioInfo, onRegionChange }: PlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // All playback runs through WaveSurfer's HTMLMediaElement. We tried a
@@ -81,6 +85,15 @@ export function Player({ file, onAudioInfo }: PlayerProps) {
   useEffect(() => {
     loopRef.current = loop;
   }, [loop]);
+
+  // Bubble region changes to the parent (used by EditPanel for trim).
+  // Ref-piping the callback so an unstable parent prop can't re-fire
+  // this effect — only actual range changes do.
+  const onRegionChangeRef = useRef(onRegionChange);
+  onRegionChangeRef.current = onRegionChange;
+  useEffect(() => {
+    onRegionChangeRef.current?.(regionRange);
+  }, [regionRange]);
 
   // ---- region loop watch (rAF-polled) -------------------------------
   function stopRegionLoopWatch() {

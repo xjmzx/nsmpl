@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
@@ -8,9 +8,13 @@ import { cn } from "../lib/cn";
 interface FileBrowserProps {
   onSelect?: (file: AudioFile) => void;
   selected?: AudioFile | null;
+  // Bump this from the parent to force a re-list of the current dir
+  // (used after a trim so the new file appears). Initial value 0 is
+  // ignored so the browser doesn't reload before the user picks a dir.
+  reloadKey?: number;
 }
 
-export function FileBrowser({ onSelect, selected }: FileBrowserProps) {
+export function FileBrowser({ onSelect, selected, reloadKey }: FileBrowserProps) {
   const [dir, setDir] = useState("");
   const [files, setFiles] = useState<AudioFile[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +35,13 @@ export function FileBrowser({ onSelect, selected }: FileBrowserProps) {
       setLoading(false);
     }
   }
+
+  // Parent-triggered reload (e.g. after a trim writes a new file).
+  useEffect(() => {
+    if (!reloadKey || !dir) return;
+    loadDir(dir);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
 
   async function browse() {
     const picked = await open({

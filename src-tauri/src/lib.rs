@@ -1,7 +1,8 @@
 // Tauri commands for smpl-tool. See https://tauri.app/develop/calling-rust/
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 
 use keyring::Entry;
@@ -89,6 +90,88 @@ fn list_audio_files(dir: String) -> Result<Vec<AudioFile>, String> {
 async fn read_audio_file(path: String) -> Result<Response, String> {
     let data = fs::read(&path).map_err(|e| format!("{path}: {e}"))?;
     Ok(Response::new(data))
+}
+
+/// Resolve the first non-colliding sibling for `{stem}-trim.{ext}` (or
+/// `-trim-2`, `-trim-3`, …) so repeated trims of the same source don't
+/// overwrite each other.
+fn next_available_trim_path(src: &Path) -> Result<PathBuf, String> {
+    let dir = src.parent().ok_or("source has no parent directory")?;
+    let stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("source filename is not valid UTF-8")?;
+    let ext = src.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let suffix = if ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{ext}")
+    };
+    let base = dir.join(format!("{stem}-trim{suffix}"));
+    if !base.exists() {
+        return Ok(base);
+    }
+    for n in 2..10_000 {
+        let p = dir.join(format!("{stem}-trim-{n}{suffix}"));
+        if !p.exists() {
+            return Ok(p);
+        }
+    }
+    Err("too many trim outputs in this folder".into())
+}
+
+/// Trim a source audio file to `[start, end]` seconds via ffmpeg
+/// stream-copy. Sample-accurate on WAV/AIFF; frame-boundary accurate on
+/// FLAC; packet-boundary (~20ms) on lossy codecs. Output is written
+/// next to the source as `{stem}-trim.{ext}` (auto-suffixed on
+/// collision). Returns the absolute output path.
+#[tauri::command]
+fn trim_audio(src: String, start: f64, end: f64) -> Result<String, String> {
+    if !start.is_finite() || !end.is_finite() || start < 0.0 || end <= start {
+        return Err(format!("invalid trim range: start={start}, end={end}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dst = next_available_trim_path(src_path)?;
+    let dst_str = dst.to_string_lossy().into_owned();
+
+    // -ss before -i = fast input seek (per-format-accurate, no full re-read).
+    // -c copy keeps the original codec/quality.
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            &format!("{start:.6}"),
+            "-to",
+            &format!("{end:.6}"),
+            "-i",
+            &src,
+            "-c",
+            "copy",
+            &dst_str,
+        ])
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "ffmpeg not found on PATH — install ffmpeg to enable trim".to_string()
+            } else {
+                format!("ffmpeg launch failed: {e}")
+            }
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Best-effort cleanup if ffmpeg created a zero-byte file on failure.
+        let _ = fs::remove_file(&dst);
+        return Err(format!("ffmpeg failed: {}", stderr.trim()));
+    }
+
+    Ok(dst_str)
 }
 
 // ---- nostr identity (OS keychain) -------------------------------------
@@ -197,6 +280,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_audio_files,
             read_audio_file,
+            trim_audio,
             get_identity,
             generate_identity,
             import_identity,
