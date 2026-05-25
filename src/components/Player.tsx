@@ -174,34 +174,36 @@ function gridTiersFor(duration: number): GridTier[] {
   if (duration <= 0) return [];
   if (duration < 5) {
     return [
-      { interval: 1, opacity: 0.7 },
-      { interval: 0.5, opacity: 0.35 },
-      { interval: 0.1, opacity: 0.15 },
+      { interval: 1, opacity: 0.9 },
+      { interval: 0.5, opacity: 0.55 },
+      { interval: 0.1, opacity: 0.28 },
     ];
   }
   if (duration < 30) {
     return [
-      { interval: 5, opacity: 0.7 },
-      { interval: 1, opacity: 0.35 },
-      { interval: 0.5, opacity: 0.15 },
+      { interval: 5, opacity: 0.9 },
+      { interval: 1, opacity: 0.55 },
+      { interval: 0.5, opacity: 0.28 },
     ];
   }
   if (duration < 120) {
     return [
-      { interval: 10, opacity: 0.7 },
-      { interval: 5, opacity: 0.35 },
-      { interval: 1, opacity: 0.15 },
+      { interval: 10, opacity: 0.9 },
+      { interval: 5, opacity: 0.55 },
+      { interval: 1, opacity: 0.28 },
     ];
   }
   return [
-    { interval: 60, opacity: 0.7 },
-    { interval: 10, opacity: 0.35 },
-    { interval: 5, opacity: 0.15 },
+    { interval: 60, opacity: 0.9 },
+    { interval: 10, opacity: 0.55 },
+    { interval: 5, opacity: 0.28 },
   ];
 }
 function gridGradient(duration: number): string {
   const tiers = gridTiersFor(duration);
   if (tiers.length === 0) return "none";
+  // Brighter cursor-tone (rgb 205,214,244) instead of slate, plus a
+  // hard pixel stop for crisper lines against the wave bars.
   // First listed = topmost in CSS painting order; major tier sits
   // on top so it doesn't get washed out by the finer layers.
   return tiers
@@ -210,8 +212,8 @@ function gridGradient(duration: number): string {
       const pct = 100 / segments;
       return (
         `repeating-linear-gradient(to right, ` +
-        `rgba(108, 112, 134, ${t.opacity}) 0, ` +
-        `rgba(108, 112, 134, ${t.opacity}) 1px, ` +
+        `rgba(205, 214, 244, ${t.opacity}) 0, ` +
+        `rgba(205, 214, 244, ${t.opacity}) 1px, ` +
         `transparent 1px, transparent ${pct}%)`
       );
     })

@@ -4,28 +4,51 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
   Loader2,
   Radio,
+  Sparkles,
   Upload,
 } from "lucide-react";
 import { Section } from "./Section";
 import { readAudioFile, type AudioFile } from "../lib/tauri";
 import {
   DEFAULT_NIP96_ENDPOINT,
+  generateIdentity,
   publishFileMetadata,
+  saveKey,
   uploadToNip96,
   type Identity,
   type PublishResult,
 } from "../lib/nostr";
 import { cn } from "../lib/cn";
 
+// damus rate-limits batch publish — kept out of the seed list. Use
+// fizx.uk + nos.lol + primal as the default trio.
 const DEFAULT_RELAYS = [
-  "wss://relay.damus.io",
+  "wss://relay.fizx.uk",
   "wss://nos.lol",
   "wss://relay.primal.net",
 ];
 
 const EXPANDED_KEY = "smpl-tool.nostr.expanded";
+const RELAYS_KEY = "smpl-tool.relays";
+
+function loadRelays(): string[] {
+  try {
+    const raw = localStorage.getItem(RELAYS_KEY);
+    if (!raw) return DEFAULT_RELAYS;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
+      return parsed;
+    }
+  } catch {
+    /* fallthrough */
+  }
+  return DEFAULT_RELAYS;
+}
 
 function endpointHost(url: string): string {
   return url.replace(/^https?:\/\//i, "").split("/")[0] ?? url;
@@ -61,9 +84,14 @@ type Status =
 interface NostrPanelProps {
   file: AudioFile | null;
   identity: Identity | null;
+  setIdentity: (id: Identity | null) => void;
 }
 
-export function NostrPanel({ file, identity }: NostrPanelProps) {
+export function NostrPanel({
+  file,
+  identity,
+  setIdentity,
+}: NostrPanelProps) {
   const [expanded, setExpanded] = useState(
     () => localStorage.getItem(EXPANDED_KEY) === "1",
   );
@@ -71,7 +99,36 @@ export function NostrPanel({ file, identity }: NostrPanelProps) {
     localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
   }, [expanded]);
 
-  const [relays, setRelays] = useState<string[]>(DEFAULT_RELAYS);
+  const [relays, setRelays] = useState<string[]>(loadRelays);
+  useEffect(() => {
+    localStorage.setItem(RELAYS_KEY, JSON.stringify(relays));
+  }, [relays]);
+
+  // Logged-out identity loader (only used when no identity yet).
+  const [keyInput, setKeyInput] = useState("");
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [revealNew, setRevealNew] = useState(false);
+
+  async function handleLoadKey() {
+    setKeyError(null);
+    try {
+      const id = await saveKey(keyInput);
+      setIdentity(id);
+      setKeyInput("");
+      setRevealNew(false);
+    } catch (e) {
+      setKeyError(String(e));
+    }
+  }
+  async function handleGenerateKey() {
+    setKeyError(null);
+    try {
+      const id = await generateIdentity();
+      setIdentity(id);
+    } catch (e) {
+      setKeyError(String(e));
+    }
+  }
   const [newRelay, setNewRelay] = useState("");
   const [endpoint, setEndpoint] = useState(DEFAULT_NIP96_ENDPOINT);
 
@@ -165,6 +222,15 @@ export function NostrPanel({ file, identity }: NostrPanelProps) {
                   : "Publish to Nostr";
 
   const collapsedSummary = `relays: ${relays.length} · ${endpointHost(endpoint)}`;
+  // Section icon swaps to KeyRound when logged out — the panel
+  // doubles as the sign-in surface, so a key icon flags "your
+  // identity lives here". Switches to the broadcast Radio glyph
+  // once you're signed in and publishing is the panel's job.
+  const sectionIcon = identity ? (
+    <Radio size={16} />
+  ) : (
+    <KeyRound size={16} />
+  );
 
   const sectionTitle = (
     <button
@@ -181,12 +247,75 @@ export function NostrPanel({ file, identity }: NostrPanelProps) {
 
   if (!expanded) {
     return (
-      <Section title={sectionTitle} icon={<Radio size={16} />}>
+      <Section title={sectionTitle} icon={sectionIcon}>
         <p
           className="text-xs text-muted truncate font-mono"
           title={collapsedSummary}
         >
           {collapsedSummary}
+        </p>
+      </Section>
+    );
+  }
+
+  // Logged-out view: just the identity loader. Identity management
+  // for already-signed-in flows lives in the header KeyRound chip
+  // (forget) — no inline identity block when signed in.
+  if (!identity) {
+    return (
+      <Section title={sectionTitle} icon={sectionIcon}>
+        <p className="text-xs text-muted">
+          ndisc.smpl signs publishes with a Nostr keypair. Generate a new
+          identity or paste an existing nsec — your secret key is stored
+          in the OS keychain (libsecret on Linux), never in plain files.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type={revealNew ? "text" : "password"}
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleLoadKey()}
+            placeholder="paste nsec1… or 64-char hex"
+            className="flex-1 px-2.5 py-1.5 rounded-md bg-surface text-fg
+                       placeholder:text-muted outline-none border border-transparent
+                       focus:border-accent/50 text-xs font-mono"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            onClick={() => setRevealNew((p) => !p)}
+            title={revealNew ? "Hide" : "Show"}
+            className="p-1.5 rounded text-muted hover:text-fg"
+          >
+            {revealNew ? <EyeOff size={12} /> : <Eye size={12} />}
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={handleLoadKey}
+            disabled={!keyInput.trim()}
+            className="flex-1 px-3 py-1.5 rounded-md bg-surface hover:bg-surfaceHover
+                       text-fg disabled:opacity-50 text-xs flex items-center
+                       justify-center gap-1.5"
+          >
+            <KeyRound size={12} /> Use this key
+          </button>
+          <button
+            onClick={handleGenerateKey}
+            className="flex-1 px-3 py-1.5 rounded-md bg-surface hover:bg-surfaceHover
+                       text-accent text-xs flex items-center justify-center gap-1.5"
+          >
+            <Sparkles size={12} /> Generate
+          </button>
+        </div>
+        {keyError && (
+          <p className="text-xs text-alert font-mono break-all">{keyError}</p>
+        )}
+        <p className="text-[10px] text-muted">
+          Dev builds use a separate keychain service so <code>make dev</code>
+          {" "}runs don&apos;t touch the installed app&apos;s identity. Use the
+          KeyRound chip in the header to forget the key.
         </p>
       </Section>
     );

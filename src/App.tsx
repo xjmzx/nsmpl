@@ -4,6 +4,7 @@ import {
   Disc3,
   KeyRound,
   Lock,
+  LogOut,
   Pause,
   Play,
   SkipBack,
@@ -13,8 +14,12 @@ import {
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
-import { IdentityPanel } from "./components/IdentityPanel";
+// IdentityPanel is intentionally NOT imported here — the file is
+// kept around as a parked module for a future account / key-switcher
+// surface. Identity for the everyday flow now lives in NostrPanel
+// (logged-out view) and the header KeyRound chip (logged-in forget).
 import { Player, type PlayerHandle } from "./components/Player";
+import { clearIdentity } from "./lib/nostr";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
 import type { AudioFile, AudioInfo } from "./lib/tauri";
@@ -194,6 +199,22 @@ export default function App() {
   }
   const anyPlaying =
     trackPlaying[0] || (tracksVisible === 2 && trackPlaying[1]);
+  async function handleForgetIdentity() {
+    if (
+      !confirm(
+        "Forget this nsec from the OS keychain? Make sure you've backed it up.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await clearIdentity();
+      setIdentity(null);
+    } catch (e) {
+      alert(`Could not clear keychain entry: ${e}`);
+    }
+  }
+
   function togglePlayBoth() {
     if (anyPlaying) {
       player0Ref.current?.pause();
@@ -377,6 +398,20 @@ export default function App() {
             <Sliders size={12} />
             edits
           </button>
+          {/* Forget-identity chip — only rendered when logged in
+              (matches ndisc's header pattern). Sign-in lives in the
+              Publish · Nostr panel where the KeyRound icon sits. */}
+          {identity && (
+            <button
+              type="button"
+              onClick={handleForgetIdentity}
+              title="Signed in — click to forget the nsec from the OS keychain"
+              aria-label="Forget identity"
+              className="px-2.5 py-2 rounded-md text-xs font-mono inline-flex items-center gap-1.5 transition-colors bg-mauve text-bg hover:bg-mauve/80 cursor-pointer"
+            >
+              <LogOut size={12} />
+            </button>
+          )}
         </div>
       </header>
 
@@ -393,7 +428,6 @@ export default function App() {
             onListing={handleListing}
           />
           <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
-          <IdentityPanel identity={identity} setIdentity={setIdentity} />
         </div>
 
         {/* Right column: two tracks + publish. FileBrowser clicks load
@@ -441,7 +475,11 @@ export default function App() {
               />
             </>
           )}
-          <NostrPanel file={focusedFile} identity={identity} />
+          <NostrPanel
+            file={focusedFile}
+            identity={identity}
+            setIdentity={setIdentity}
+          />
         </div>
       </div>
 
@@ -480,16 +518,10 @@ export default function App() {
           </span>
         )}
 
-        {/* Focused-track sample chip on the right (or invisible
-            placeholder so identity stays visually centered). */}
-        {focusedFile ? (
-          <span title={focusedFile.path}>
-            <span className="text-mauve mr-1">T{focused + 1}</span>
-            {focusedFile.name}
-          </span>
-        ) : (
-          <span className="opacity-0">·</span>
-        )}
+        {/* Right-edge spacer — keeps the identity chip visually
+            centered in the footer without showing the focused-track
+            filename (which already lives in each Track's title). */}
+        <span className="opacity-0">·</span>
       </footer>
     </div>
   );
@@ -511,20 +543,29 @@ function MasterStrip({
   // Match the per-Track transport chip padding so master + track
   // buttons align horizontally row to row.
   const btn = density === "slim" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2";
-  // Outer padding matches the Section padding (p-3 slim, p-4 wide) so
-  // the chip's left edge sits at the same x as the Track transport chip.
+  // Horizontal padding only — outer container matches the Track
+  // Section's left/right padding so the buttons align column-to-
+  // column with the per-track transport chip, but no extra
+  // top/bottom thickness around the strip.
   const outerPad = density === "slim" ? "px-3" : "px-4";
+  // Inter-button gap restored — Cue / Play-Pause / Stop are separate
+  // rounded chips with a small space between, instead of one fused
+  // segmented chip.
+  const masterBtn =
+    btn +
+    " rounded-md bg-mauve text-bg hover:bg-mauve/80 transition-colors" +
+    " flex items-center justify-center";
   return (
-    <div className={`flex items-center gap-2 ${outerPad}`}>
-      <div className="inline-flex rounded-md overflow-hidden bg-mauve">
+    <div className={`flex items-center gap-3 ${outerPad}`}>
+      <div className="inline-flex gap-1">
         <button
           type="button"
           onClick={onCue}
           title="Cue both — pause both tracks and seek to start"
           aria-label="Cue both tracks"
-          className={`${btn} text-bg hover:bg-mauve/80 transition-colors flex items-center justify-center`}
+          className={masterBtn}
         >
-          <SkipBack size={14} />
+          <SkipBack size={14} fill="currentColor" />
         </button>
         <button
           type="button"
@@ -532,20 +573,31 @@ function MasterStrip({
           title={playing ? "Pause both tracks" : "Play both tracks"}
           aria-label={playing ? "Pause both tracks" : "Play both tracks"}
           aria-pressed={playing}
-          className={`${btn} border-l border-bg/30 text-bg hover:bg-mauve/80 transition-colors flex items-center justify-center`}
+          className={masterBtn}
         >
-          {playing ? <Pause size={14} /> : <Play size={14} />}
+          {playing ? (
+            <Pause size={14} fill="currentColor" />
+          ) : (
+            <Play size={14} fill="currentColor" />
+          )}
         </button>
         <button
           type="button"
           onClick={onStop}
           title="Stop both tracks (pauses, returns each to its region start or 0)"
           aria-label="Stop both tracks"
-          className={`${btn} border-l border-bg/30 text-bg hover:bg-mauve/80 transition-colors flex items-center justify-center`}
+          className={masterBtn}
         >
-          <Square size={14} />
+          <Square size={14} fill="currentColor" />
         </button>
       </div>
+      {/* Visible bar extending out from the buttons — muted so it
+          doesn't compete with the mauve chip; flex-1 so it takes
+          whatever horizontal space is left. */}
+      <div
+        aria-hidden="true"
+        className="flex-1 h-1.5 bg-surface/70 rounded-full"
+      />
     </div>
   );
 }
