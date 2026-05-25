@@ -1,16 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  KeyRound,
-  Lock,
-  Sliders,
-} from "lucide-react";
+import { KeyRound, Lock, Play, SkipBack, Sliders, Square } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
 import { IdentityPanel } from "./components/IdentityPanel";
-import { Player } from "./components/Player";
+import { Player, type PlayerHandle } from "./components/Player";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
 import type { AudioFile, AudioInfo } from "./lib/tauri";
@@ -19,7 +13,6 @@ import { loadIdentity, type Identity } from "./lib/nostr";
 const THEME_KEY = "smpl-tool.theme";
 const DENSITY_KEY = "smpl-tool.density";
 const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
-const NIP_EXPANDED_KEY = "smpl-tool.nip.expanded";
 const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
 const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
@@ -89,9 +82,6 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [density, setDensity] = useState<Density>(loadDensity);
   const [tracksVisible, setTracksVisible] = useState<TracksVisible>(loadTracksVisible);
-  const [nipExpanded, setNipExpanded] = useState<boolean>(
-    () => localStorage.getItem(NIP_EXPANDED_KEY) === "1",
-  );
   const [editsExpanded, setEditsExpanded] = useState<boolean>(
     () => localStorage.getItem(EDITS_EXPANDED_KEY) === "1",
   );
@@ -103,9 +93,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(TRACKS_VISIBLE_KEY, String(tracksVisible));
   }, [tracksVisible]);
-  useEffect(() => {
-    localStorage.setItem(NIP_EXPANDED_KEY, nipExpanded ? "1" : "0");
-  }, [nipExpanded]);
   useEffect(() => {
     localStorage.setItem(EDITS_EXPANDED_KEY, editsExpanded ? "1" : "0");
   }, [editsExpanded]);
@@ -144,6 +131,23 @@ export default function App() {
   function pickTracksVisible(n: TracksVisible) {
     setTracksVisible(n);
     if (n === 1 && focused === 1) setFocused(0);
+  }
+
+  // Imperative refs to each Player for the between-tracks "master"
+  // transport (play/stop/cue both at once).
+  const player0Ref = useRef<PlayerHandle>(null);
+  const player1Ref = useRef<PlayerHandle>(null);
+  function playBoth() {
+    player0Ref.current?.play();
+    player1Ref.current?.play();
+  }
+  function stopBoth() {
+    player0Ref.current?.stop();
+    player1Ref.current?.stop();
+  }
+  function cueBoth() {
+    player0Ref.current?.cue();
+    player1Ref.current?.cue();
   }
 
   function loadIntoFocused(f: AudioFile) {
@@ -244,52 +248,26 @@ export default function App() {
           )}
         </div>
 
-        {/* NIP spec — click "Publish samples to Nostr" to expand the
-            full wire-format detail inline. Persisted; defaults collapsed. */}
-        <div className="hidden md:flex flex-1 items-center justify-end min-w-0
-                        gap-x-2 gap-y-1 flex-wrap text-xs text-muted">
-          <button
-            type="button"
-            onClick={() => setNipExpanded((p) => !p)}
-            aria-expanded={nipExpanded}
-            title={nipExpanded ? "Collapse publish spec" : "Expand publish spec"}
-            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-md
-                       bg-surface text-mauve font-mono text-xs
-                       hover:bg-mauve/15 transition-colors whitespace-nowrap"
-          >
-            <span>Publish samples to Nostr</span>
-            {nipExpanded ? (
-              <ChevronDown size={12} />
-            ) : (
-              <ChevronRight size={12} />
-            )}
-          </button>
-          {nipExpanded && (
-            <>
-              <span className="text-surface/80">|</span>
-              <span className="whitespace-nowrap">
-                <span className="font-mono text-accent">kind 1063</span>{" "}
-                <span className="text-fg/70">(NIP-94 — file metadata)</span>
-              </span>
-              <span className="text-surface/80">|</span>
-              <span className="whitespace-nowrap">
-                <span className="text-fg/70">tags: </span>
-                <span className="font-mono text-accent">
-                  url, m, x, size, title
-                </span>
-              </span>
-              <span className="text-surface/80">|</span>
-              <span className="whitespace-nowrap">
-                <span className="text-fg/70">auth: </span>
-                <span className="font-mono text-accent">NIP-98</span>
-                <span className="text-fg/70">
-                  {" "}
-                  (HTTP Auth, kind 27235). Upload:{" "}
-                </span>
-                <span className="font-mono text-accent">NIP-96</span>
-              </span>
-            </>
-          )}
+        {/* Publish spec — always visible, single line. Uses all the
+            horizontal space between the version chip and the selectors. */}
+        <div
+          className="hidden md:flex flex-1 items-center justify-end min-w-0
+                     text-xs leading-snug whitespace-nowrap overflow-hidden"
+        >
+          <span className="text-mauve font-mono mr-2 shrink-0">Nostr</span>
+          <span className="font-mono text-accent shrink-0">kind 1063</span>
+          <span className="text-fg/70 shrink-0">
+            {" "}
+            (NIP94 file metadata){" "}
+          </span>
+          <span className="text-fg/70 shrink-0">tags: </span>
+          <span className="font-mono text-accent shrink-0">
+            url, m, x, size, title
+          </span>
+          <span className="text-fg/70 shrink-0"> auth: </span>
+          <span className="font-mono text-accent shrink-0">NIP-98</span>
+          <span className="text-fg/70 shrink-0"> (27235). Upload: </span>
+          <span className="font-mono text-accent shrink-0">NIP-96</span>
         </div>
 
         {/* View + tracks selectors — far right, height matches the version
@@ -358,6 +336,7 @@ export default function App() {
             their content; any leftover height ends up below the last card. */}
         <div className="grid grid-cols-1 gap-4 content-start">
           <Player
+            ref={player0Ref}
             file={files[0]}
             label="1"
             focused={tracksVisible === 2 && focused === 0}
@@ -368,16 +347,24 @@ export default function App() {
             editsExpanded={editsExpanded}
           />
           {tracksVisible === 2 && (
-            <Player
-              file={files[1]}
-              label="2"
-              focused={focused === 1}
-              onFocus={() => setFocused(1)}
-              onAudioInfo={(i) => setAudioInfoFor(1, i)}
-              onEdited={() => setEditCount((n) => n + 1)}
-              density={density}
-              editsExpanded={editsExpanded}
-            />
+            <>
+              <MasterStrip
+                onPlay={playBoth}
+                onStop={stopBoth}
+                onCue={cueBoth}
+              />
+              <Player
+                ref={player1Ref}
+                file={files[1]}
+                label="2"
+                focused={focused === 1}
+                onFocus={() => setFocused(1)}
+                onAudioInfo={(i) => setAudioInfoFor(1, i)}
+                onEdited={() => setEditCount((n) => n + 1)}
+                density={density}
+                editsExpanded={editsExpanded}
+              />
+            </>
           )}
           <NostrPanel file={focusedFile} identity={identity} />
         </div>
@@ -429,6 +416,53 @@ export default function App() {
           <span className="opacity-0">·</span>
         )}
       </footer>
+    </div>
+  );
+}
+
+function MasterStrip({
+  onCue,
+  onPlay,
+  onStop,
+}: {
+  onCue: () => void;
+  onPlay: () => void;
+  onStop: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-2 py-1">
+      <span className="text-[10px] uppercase tracking-wide text-muted font-mono">
+        master
+      </span>
+      <div className="inline-flex rounded-md overflow-hidden bg-surface">
+        <button
+          type="button"
+          onClick={onCue}
+          title="Cue both — pause both tracks and seek to start"
+          aria-label="Cue both tracks"
+          className="px-3 py-1.5 text-muted hover:bg-mauve/15 hover:text-mauve transition-colors"
+        >
+          <SkipBack size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={onPlay}
+          title="Play both tracks"
+          aria-label="Play both tracks"
+          className="px-3 py-1.5 border-l border-bg/40 text-muted hover:bg-mauve/15 hover:text-mauve transition-colors"
+        >
+          <Play size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={onStop}
+          title="Stop both tracks (pauses, returns each to its region start or 0)"
+          aria-label="Stop both tracks"
+          className="px-3 py-1.5 border-l border-bg/40 text-muted hover:bg-mauve/15 hover:text-mauve transition-colors"
+        >
+          <Square size={14} />
+        </button>
+      </div>
     </div>
   );
 }

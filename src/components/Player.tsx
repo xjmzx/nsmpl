@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import {
   Crop,
   Gauge,
@@ -7,6 +13,7 @@ import {
   Play,
   Repeat,
   Scissors,
+  SkipBack,
   Square,
   TrendingDown,
   TrendingUp,
@@ -73,6 +80,16 @@ const DENSITY = {
 } as const;
 
 type EditMode = "trim" | "prune" | "gain" | "fadein" | "fadeout";
+
+/// Imperative handle exposed to App for the "master" between-tracks
+/// strip. Each fans out to one Player; the bare audio path already
+/// supports two HTMLMediaElements playing simultaneously (the OS
+/// mixer combines them at the speakers).
+export type PlayerHandle = {
+  play: () => void;
+  stop: () => void;
+  cue: () => void;
+};
 type EditStatus =
   | { kind: "ok"; mode: EditMode; path: string }
   | { kind: "err"; mode: EditMode; msg: string };
@@ -116,16 +133,19 @@ const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 // shorter is just a hit, not a beat pattern.
 const BPM_MIN_DURATION = 5; // seconds
 
-export function Player({
-  file,
-  onAudioInfo,
-  onEdited,
-  label,
-  focused,
-  onFocus,
-  density = "slim",
-  editsExpanded = false,
-}: PlayerProps) {
+export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
+  {
+    file,
+    onAudioInfo,
+    onEdited,
+    label,
+    focused,
+    onFocus,
+    density = "slim",
+    editsExpanded = false,
+  },
+  ref,
+) {
   const D = DENSITY[density];
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -471,6 +491,19 @@ export function Player({
     ws.setTime(activeRegionRef.current?.start ?? 0);
   }
 
+  function cue() {
+    stopRegionLoopWatch();
+    const ws = wsRef.current;
+    if (!ws) return;
+    ws.pause();
+    ws.setTime(0);
+  }
+
+  // Expose the transport to the App-level "master" strip. Closures
+  // read wsRef.current at call time, so the handle stays correct
+  // across file loads.
+  useImperativeHandle(ref, () => ({ play, stop, cue }), []);
+
   function toggleLoop() {
     setLoop((p) => !p);
   }
@@ -544,6 +577,20 @@ export function Player({
       {/* Transport row — always visible. Deck-first layout: playback,
           region readout, volume, loop. */}
       <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={cue}
+          disabled={!file || loading}
+          title="Cue — pause and return playhead to the start of the file"
+          aria-label="Cue to start"
+          className={cn(
+            D.btn,
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center justify-center text-fg",
+          )}
+        >
+          <SkipBack size={14} />
+        </button>
         <button
           onClick={playing ? pause : play}
           disabled={!file || loading}
@@ -896,4 +943,4 @@ export function Player({
       )}
     </Section>
   );
-}
+});

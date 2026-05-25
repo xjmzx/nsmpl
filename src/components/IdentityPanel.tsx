@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Eye,
   EyeOff,
@@ -17,6 +19,8 @@ import {
 } from "../lib/nostr";
 import { cn } from "../lib/cn";
 
+const EXPANDED_KEY = "smpl-tool.identity.expanded";
+
 function shortNpub(npub: string): string {
   return npub.length > 28 ? `${npub.slice(0, 14)}…${npub.slice(-8)}` : npub;
 }
@@ -27,6 +31,13 @@ interface IdentityPanelProps {
 }
 
 export function IdentityPanel({ identity, setIdentity }: IdentityPanelProps) {
+  const [expanded, setExpanded] = useState(
+    () => localStorage.getItem(EXPANDED_KEY) === "1",
+  );
+  useEffect(() => {
+    localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
+  }, [expanded]);
+
   const [keyInput, setKeyInput] = useState("");
   const [keyError, setKeyError] = useState<string | null>(null);
   const [revealNew, setRevealNew] = useState(false);
@@ -82,9 +93,33 @@ export function IdentityPanel({ identity, setIdentity }: IdentityPanelProps) {
     }
   }
 
+  const collapsedSummary = identity
+    ? `signed in · ${shortNpub(identity.npub)}`
+    : "no key in keychain";
+
+  const title = (
+    <button
+      type="button"
+      onClick={() => setExpanded((p) => !p)}
+      aria-expanded={expanded}
+      className="inline-flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+      title={expanded ? "Collapse identity panel" : "Expand identity panel"}
+    >
+      <span>Identity</span>
+      {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+    </button>
+  );
+
   return (
-    <Section title="Identity" icon={<KeyRound size={16} />}>
-      {identity ? (
+    <Section title={title} icon={<KeyRound size={16} />}>
+      {!expanded ? (
+        <p
+          className="text-xs text-muted truncate font-mono"
+          title={collapsedSummary}
+        >
+          {collapsedSummary}
+        </p>
+      ) : identity ? (
         <div className="space-y-2">
           <div className="px-2 py-1.5 rounded-md bg-bg/50 flex items-center justify-between gap-2">
             <div className="min-w-0">

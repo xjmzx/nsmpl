@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Radio, Upload } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Loader2,
+  Radio,
+  Upload,
+} from "lucide-react";
 import { Section } from "./Section";
 import { readAudioFile, type AudioFile } from "../lib/tauri";
 import {
@@ -16,6 +24,12 @@ const DEFAULT_RELAYS = [
   "wss://nos.lol",
   "wss://relay.primal.net",
 ];
+
+const EXPANDED_KEY = "smpl-tool.nostr.expanded";
+
+function endpointHost(url: string): string {
+  return url.replace(/^https?:\/\//i, "").split("/")[0] ?? url;
+}
 
 const MIME_BY_EXT: Record<string, string> = {
   wav: "audio/wav",
@@ -50,6 +64,13 @@ interface NostrPanelProps {
 }
 
 export function NostrPanel({ file, identity }: NostrPanelProps) {
+  const [expanded, setExpanded] = useState(
+    () => localStorage.getItem(EXPANDED_KEY) === "1",
+  );
+  useEffect(() => {
+    localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
+  }, [expanded]);
+
   const [relays, setRelays] = useState<string[]>(DEFAULT_RELAYS);
   const [newRelay, setNewRelay] = useState("");
   const [endpoint, setEndpoint] = useState(DEFAULT_NIP96_ENDPOINT);
@@ -125,8 +146,54 @@ export function NostrPanel({ file, identity }: NostrPanelProps) {
     status.kind === "uploading" ||
     status.kind === "publishing";
 
+  // Inline status caption shown next to the icon-only Publish button.
+  const statusText =
+    status.kind === "reading"
+      ? "reading file…"
+      : status.kind === "uploading"
+        ? "uploading…"
+        : status.kind === "publishing"
+          ? "publishing…"
+          : status.kind === "ok"
+            ? "published"
+            : status.kind === "err"
+              ? "failed — try again"
+              : !identity
+                ? "load a key in the Identity panel first"
+                : !file
+                  ? "select a sample"
+                  : "Publish to Nostr";
+
+  const collapsedSummary = `relays: ${relays.length} · ${endpointHost(endpoint)}`;
+
+  const sectionTitle = (
+    <button
+      type="button"
+      onClick={() => setExpanded((p) => !p)}
+      aria-expanded={expanded}
+      className="inline-flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+      title={expanded ? "Collapse publish panel" : "Expand publish panel"}
+    >
+      <span>Publish · Nostr</span>
+      {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+    </button>
+  );
+
+  if (!expanded) {
+    return (
+      <Section title={sectionTitle} icon={<Radio size={16} />}>
+        <p
+          className="text-xs text-muted truncate font-mono"
+          title={collapsedSummary}
+        >
+          {collapsedSummary}
+        </p>
+      </Section>
+    );
+  }
+
   return (
-    <Section title="Publish · Nostr" icon={<Radio size={16} />}>
+    <Section title={sectionTitle} icon={<Radio size={16} />}>
       {/* ---- Relays ---- */}
       <div>
         <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
@@ -206,38 +273,46 @@ export function NostrPanel({ file, identity }: NostrPanelProps) {
         />
       </div>
 
-      {/* ---- Publish ---- */}
-      <button
-        onClick={handlePublish}
-        disabled={!identity || !file || busy}
-        className={cn(
-          "w-full px-3 py-2.5 rounded-md font-semibold",
-          "flex items-center justify-center gap-2",
-          "disabled:opacity-50 disabled:cursor-not-allowed",
-          status.kind === "ok"
-            ? "bg-ok/20 text-ok"
-            : status.kind === "err"
-              ? "bg-alert/20 text-alert"
-              : "bg-accent text-bg hover:opacity-90",
-        )}
-      >
-        <Upload size={16} />
-        {status.kind === "reading"
-          ? "reading file…"
-          : status.kind === "uploading"
-            ? "uploading…"
-            : status.kind === "publishing"
-              ? "publishing…"
-              : status.kind === "ok"
-                ? "published ✓"
-                : status.kind === "err"
-                  ? "failed — try again"
-                  : !identity
-                    ? "load a key in the Identity panel first"
-                    : !file
-                      ? "select a sample"
-                      : "Publish to Nostr"}
-      </button>
+      {/* ---- Publish (icon-only button + status caption alongside) ---- */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handlePublish}
+          disabled={!identity || !file || busy}
+          title={statusText}
+          aria-label="Publish to Nostr"
+          className={cn(
+            "w-20 px-3 py-2.5 rounded-md font-semibold shrink-0",
+            "flex items-center justify-center",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            status.kind === "ok"
+              ? "bg-ok/20 text-ok"
+              : status.kind === "err"
+                ? "bg-alert/20 text-alert"
+                : "bg-accent text-bg hover:opacity-90",
+          )}
+        >
+          {busy ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <Upload size={16} />
+          )}
+        </button>
+        <p
+          className={cn(
+            "text-xs min-w-0 truncate",
+            status.kind === "ok"
+              ? "text-ok"
+              : status.kind === "err"
+                ? "text-alert"
+                : busy
+                  ? "text-fg"
+                  : "text-muted",
+          )}
+          title={statusText}
+        >
+          {statusText}
+        </p>
+      </div>
 
       {status.kind === "err" && (
         <pre className="text-xs text-alert font-mono break-all whitespace-pre-wrap">
