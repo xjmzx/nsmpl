@@ -7,6 +7,7 @@ import {
   Repeat,
   Scissors,
   Square,
+  Volume2,
   X,
 } from "lucide-react";
 import WaveSurfer from "wavesurfer.js";
@@ -157,6 +158,21 @@ export function Player({
     wsRef.current?.setOptions({ height: D.waveHeight });
   }, [D.waveHeight]);
 
+  // ---- volume (live, non-destructive) ------------------------------
+  // We deliberately do NOT route through Web Audio here. On WebKit2GTK
+  // wrapping the media element with createMediaElementSource hijacks
+  // its audio path into the Web Audio graph, and the same destination
+  // bug that mutes AudioBufferSourceNode (memory: feedback_webkit2gtk_audio)
+  // applies — playback refuses or goes silent. Setting
+  // HTMLMediaElement.volume directly via WaveSurfer.setVolume is
+  // bypass-safe and gives us a master attenuator per track (0..1).
+  const [volume, setVolume] = useState(1);
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  useEffect(() => {
+    wsRef.current?.setVolume(volume);
+  }, [volume]);
+
   async function runEdit(mode: EditMode) {
     if (!file || !regionRange || editBusy) return;
     setEditBusy(mode);
@@ -245,6 +261,11 @@ export function Player({
       setDuration(ws.getDuration());
       setLoading(false);
       regions.enableDragSelection({ color: REGION_FILL });
+      // Apply the current volume to the freshly-created element.
+      // Read via ref so we use the latest value (the effect dep list
+      // intentionally excludes `volume` — we don't want to rebuild ws
+      // on slider drags).
+      ws.setVolume(volumeRef.current);
     });
     ws.on("play", () => setPlaying(true));
     ws.on("pause", () => setPlaying(false));
@@ -533,25 +554,48 @@ export function Player({
           </div>
         )}
 
-        <button
-          onClick={toggleLoop}
-          disabled={!file || loading}
-          className={cn(
-            "ml-auto rounded-md flex items-center gap-1.5",
-            D.btn,
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            loop
-              ? "bg-accent/20 text-accent"
-              : "bg-surface hover:bg-surfaceHover text-fg",
-          )}
-          title={
-            regionRange
-              ? "Loop the selected region"
-              : "Loop the whole file"
-          }
-        >
-          <Repeat size={14} /> Loop
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <div
+            className="inline-flex items-center gap-1.5"
+            title={`Volume: ${Math.round(volume * 100)}%`}
+          >
+            <Volume2
+              size={14}
+              className={cn(file ? "text-muted" : "text-muted/40")}
+            />
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              disabled={!file || loading}
+              aria-label="Track volume"
+              className="w-20 accent-mauve disabled:opacity-50
+                         disabled:cursor-not-allowed cursor-pointer"
+            />
+          </div>
+          <button
+            onClick={toggleLoop}
+            disabled={!file || loading}
+            className={cn(
+              "rounded-md flex items-center gap-1.5",
+              D.btn,
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              loop
+                ? "bg-accent/20 text-accent"
+                : "bg-surface hover:bg-surfaceHover text-fg",
+            )}
+            title={
+              regionRange
+                ? "Loop the selected region"
+                : "Loop the whole file"
+            }
+          >
+            <Repeat size={14} /> Loop
+          </button>
+        </div>
       </div>
 
       {editStatus?.kind === "ok" && (
