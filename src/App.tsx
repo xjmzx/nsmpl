@@ -3,6 +3,7 @@ import { KeyRound, Lock } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
+import { IdentityPanel } from "./components/IdentityPanel";
 import { Player } from "./components/Player";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
@@ -211,6 +212,7 @@ export default function App() {
             reloadKey={editCount}
           />
           <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
+          <IdentityPanel identity={identity} setIdentity={setIdentity} />
         </div>
 
         {/* Right column: two tracks + publish. FileBrowser clicks load
@@ -239,11 +241,7 @@ export default function App() {
               density={density}
             />
           )}
-          <NostrPanel
-            file={focusedFile}
-            identity={identity}
-            setIdentity={setIdentity}
-          />
+          <NostrPanel file={focusedFile} identity={identity} />
         </div>
       </div>
 
