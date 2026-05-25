@@ -4,6 +4,8 @@ import {
   ChevronUp,
   FolderOpen,
   RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
@@ -85,6 +87,7 @@ export function FileBrowser({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<Sort>(loadSort);
+  const [query, setQuery] = useState("");
 
   // Ref-pipe onListing so an unstable parent callback doesn't re-fire
   // the listing effect (or, in the worst case, cause an infinite loop).
@@ -147,7 +150,10 @@ export function FileBrowser({
   }
 
   const sortedFiles = useMemo(() => {
-    const arr = [...files];
+    const q = query.trim().toLowerCase();
+    const arr = q
+      ? files.filter((f) => f.name.toLowerCase().includes(q))
+      : [...files];
     arr.sort((a, b) => {
       let v: number;
       if (sort.key === "name") {
@@ -160,7 +166,10 @@ export function FileBrowser({
       return sort.dir === "asc" ? v : -v;
     });
     return arr;
-  }, [files, sort]);
+  }, [files, sort, query]);
+
+  const filterActive = query.trim().length > 0;
+  const noMatches = filterActive && sortedFiles.length === 0;
 
   return (
     <Section title="Library" icon={<FolderOpen size={16} />}>
@@ -204,6 +213,36 @@ export function FileBrowser({
         <p className="mt-2 text-xs text-alert font-mono break-all">{error}</p>
       )}
 
+      {/* In-listing search — case-insensitive substring on filename. */}
+      <div className="relative">
+        <Search
+          size={12}
+          className="absolute left-2 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+        />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={files.length > 0 ? `Filter ${files.length} files…` : "Filter files…"}
+          aria-label="Filter files by name"
+          spellCheck={false}
+          disabled={files.length === 0}
+          className="w-full pl-7 pr-7 py-1.5 rounded-md bg-surface text-fg text-xs
+                     placeholder:text-muted outline-none border border-transparent
+                     focus:border-accent/50 disabled:opacity-50"
+        />
+        {filterActive && (
+          <button
+            onClick={() => setQuery("")}
+            title="Clear filter"
+            aria-label="Clear filter"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-alert"
+          >
+            <X size={11} />
+          </button>
+        )}
+      </div>
+
       <div className="mt-1 rounded-md bg-bg/50 overflow-hidden flex flex-col">
         <div
           className={cn(
@@ -229,10 +268,14 @@ export function FileBrowser({
           />
         </div>
 
-        <ul className="max-h-64 overflow-auto divide-y divide-surface/60">
+        <ul className="max-h-40 overflow-auto divide-y divide-surface/60">
           {sortedFiles.length === 0 && !loading && !error && (
             <li className="px-3 py-3 text-muted text-xs">
-              No directory loaded. Click Browse, or type a path and press Enter.
+              {files.length === 0
+                ? "No directory loaded. Click Browse, or type a path and press Enter."
+                : noMatches
+                  ? `No files match “${query.trim()}”.`
+                  : "No files."}
             </li>
           )}
           {sortedFiles.map((f) => (

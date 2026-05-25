@@ -112,6 +112,10 @@ const PROGRESS = "#89b4fa";
 const CURSOR = "#cdd6f4";
 const REGION_FILL = "rgba(137, 180, 250, 0.18)";
 
+// Min sample / region length aubio gets a fair shot at — anything
+// shorter is just a hit, not a beat pattern.
+const BPM_MIN_DURATION = 5; // seconds
+
 export function Player({
   file,
   onAudioInfo,
@@ -592,49 +596,61 @@ export function Player({
         )}
 
         {/* BPM detection chip: click to detect on the current region
-            (or whole file if no region). Re-click to redetect. */}
-        <button
-          onClick={runDetectBpm}
-          disabled={!file || bpmBusy}
-          title={
-            bpmBusy
-              ? "Detecting BPM…"
-              : bpmError
-                ? `BPM detection failed: ${bpmError}`
-                : !file
-                  ? "Load a sample first"
-                  : bpm
-                    ? `BPM (${regionRange ? "region" : "file"}): ${bpm.toFixed(2)} — click to redetect`
-                    : `Detect BPM (${regionRange ? "region" : "whole file"})`
-          }
-          className={cn(
-            "px-2 py-1 rounded-md bg-bg/50 hover:bg-surface/60",
-            "text-[10px] font-mono inline-flex items-center gap-1.5",
-            "disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
-          )}
-        >
-          {bpmBusy ? (
-            <Loader2 size={11} className="animate-spin text-muted" />
-          ) : (
-            <Gauge
-              size={11}
-              className={bpmError ? "text-alert" : "text-muted"}
-            />
-          )}
-          <span className="text-muted">BPM</span>
-          <span
-            className={cn(
-              "tabular-nums",
-              bpm
-                ? "text-mauve"
-                : bpmError
-                  ? "text-alert"
-                  : "text-muted/60",
-            )}
-          >
-            {bpmError ? "err" : bpm ? bpm.toFixed(1) : "—"}
-          </span>
-        </button>
+            (or whole file if no region). Re-click to redetect. Muted
+            for samples (or selected regions) shorter than 5 s — too
+            little material for a stable tempo estimate. */}
+        {(() => {
+          const effDur = regionRange
+            ? regionRange.end - regionRange.start
+            : duration;
+          const tooShort = !!file && effDur > 0 && effDur < BPM_MIN_DURATION;
+          return (
+            <button
+              onClick={runDetectBpm}
+              disabled={!file || bpmBusy || tooShort}
+              title={
+                bpmBusy
+                  ? "Detecting BPM…"
+                  : tooShort
+                    ? `${regionRange ? "Region" : "Sample"} shorter than ${BPM_MIN_DURATION}s — too little material for a stable BPM estimate`
+                    : bpmError
+                      ? `BPM detection failed: ${bpmError}`
+                      : !file
+                        ? "Load a sample first"
+                        : bpm
+                          ? `BPM (${regionRange ? "region" : "file"}): ${bpm.toFixed(2)} — click to redetect`
+                          : `Detect BPM (${regionRange ? "region" : "whole file"})`
+              }
+              className={cn(
+                "px-2 py-1 rounded-md bg-bg/50 hover:bg-surface/60",
+                "text-[10px] font-mono inline-flex items-center gap-1.5",
+                "disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+              )}
+            >
+              {bpmBusy ? (
+                <Loader2 size={11} className="animate-spin text-muted" />
+              ) : (
+                <Gauge
+                  size={11}
+                  className={bpmError ? "text-alert" : "text-muted"}
+                />
+              )}
+              <span className="text-muted">BPM</span>
+              <span
+                className={cn(
+                  "tabular-nums",
+                  bpm
+                    ? "text-mauve"
+                    : bpmError
+                      ? "text-alert"
+                      : "text-muted/60",
+                )}
+              >
+                {bpmError ? "err" : bpm ? bpm.toFixed(1) : "—"}
+              </span>
+            </button>
+          );
+        })()}
 
         <div className="ml-auto flex items-center gap-2">
           <div
@@ -680,9 +696,10 @@ export function Player({
         </div>
       </div>
 
-      {/* Edits row — conditional. Toggle in the header chip. */}
+      {/* Edits row — conditional. Toggle in the header chip. A small
+          mt-2 separates it from the transport row above. */}
       {editsExpanded && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
           <button
             onClick={() => runEdit("trim")}
             disabled={editDisabled}
