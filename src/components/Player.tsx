@@ -37,7 +37,28 @@ interface PlayerProps {
   // FileBrowser clicks / Publish / InfoPanel to this track.
   focused?: boolean;
   onFocus?: () => void;
+  // UI density. "slim" (default) saves vertical space on small monitors;
+  // "wide" matches the original layout with a separate filename row
+  // and taller waveform/buttons.
+  density?: "slim" | "wide";
 }
+
+// Density-dependent classNames + waveform pixel height. Slim is the
+// installed default; wide reverts to the pre-slim layout.
+const DENSITY = {
+  slim: {
+    waveHeight: 56,
+    waveContainer: "rounded-md bg-bg/50 px-2 py-1.5 min-h-[72px]",
+    section: "p-3 gap-2",
+    btn: "px-2.5 py-1.5 text-xs",
+  },
+  wide: {
+    waveHeight: 80,
+    waveContainer: "rounded-md bg-bg/50 px-2 py-2 min-h-[96px]",
+    section: "", // Section defaults (p-4 gap-3) apply.
+    btn: "px-3 py-2",
+  },
+} as const;
 
 type EditMode = "trim" | "prune";
 type EditStatus =
@@ -86,7 +107,9 @@ export function Player({
   label,
   focused,
   onFocus,
+  density = "slim",
 }: PlayerProps) {
+  const D = DENSITY[density];
   const containerRef = useRef<HTMLDivElement>(null);
 
   // All playback runs through WaveSurfer's HTMLMediaElement. We tried a
@@ -128,6 +151,11 @@ export function Player({
   useEffect(() => {
     setEditStatus(null);
   }, [file?.path]);
+
+  // Resize the live waveform when density changes without re-decoding.
+  useEffect(() => {
+    wsRef.current?.setOptions({ height: D.waveHeight });
+  }, [D.waveHeight]);
 
   async function runEdit(mode: EditMode) {
     if (!file || !regionRange || editBusy) return;
@@ -202,7 +230,7 @@ export function Player({
       progressColor: PROGRESS,
       cursorColor: CURSOR,
       cursorWidth: 1,
-      height: 80,
+      height: D.waveHeight,
       barWidth: 2,
       barGap: 1,
       barRadius: 2,
@@ -343,7 +371,26 @@ export function Player({
   const editReady = !!file && !!regionRange && regionRange.end > regionRange.start;
   const editDisabled = !editReady || editBusy !== null;
 
-  const title = label ? `Track ${label}` : "Track";
+  // Slim: filename folds into the title so the panel can skip the
+  // separate "now loaded" row. Wide: bare "Track N" title.
+  const trackText = `Track${label ? ` ${label}` : ""}`;
+  const title =
+    density === "slim" ? (
+      <span className="flex items-baseline gap-2 min-w-0">
+        <span className="shrink-0">{trackText}</span>
+        {file ? (
+          <span className="text-xs font-normal tracking-normal normal-case text-muted truncate">
+            · {file.name}
+          </span>
+        ) : (
+          <span className="text-xs font-normal tracking-normal normal-case text-muted/60">
+            · no sample loaded
+          </span>
+        )}
+      </span>
+    ) : (
+      trackText
+    );
 
   return (
     <Section
@@ -351,19 +398,19 @@ export function Player({
       icon={<Play size={16} />}
       onClick={onFocus}
       className={cn(
+        D.section,
         onFocus && "cursor-pointer",
         focused && "ring-2 ring-accent/40",
       )}
     >
-      <div className="text-xs text-muted truncate">
-        {file ? file.name : "No sample loaded"}
-      </div>
+      {density === "wide" && (
+        <div className="text-xs text-muted truncate">
+          {file ? file.name : "No sample loaded"}
+        </div>
+      )}
 
       <div className="space-y-1">
-        <div
-          ref={containerRef}
-          className="rounded-md bg-bg/50 px-2 py-2 min-h-[96px]"
-        />
+        <div ref={containerRef} className={D.waveContainer} />
         <div className="flex justify-between text-[10px] text-muted font-mono">
           <span>{fmt(time)}</span>
           <span>
@@ -387,9 +434,12 @@ export function Player({
         <button
           onClick={playing ? pause : play}
           disabled={!file || loading}
-          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
-                     disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center gap-1.5 text-fg"
+          className={cn(
+            D.btn,
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center gap-1.5 text-fg",
+          )}
         >
           {playing ? <Pause size={14} /> : <Play size={14} />}
           {playing ? "Pause" : "Play"}
@@ -397,9 +447,12 @@ export function Player({
         <button
           onClick={stop}
           disabled={!file || loading}
-          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
-                     disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center gap-1.5 text-fg"
+          className={cn(
+            D.btn,
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center gap-1.5 text-fg",
+          )}
         >
           <Square size={14} /> Stop
         </button>
@@ -416,9 +469,12 @@ export function Player({
                   ? "Drag a loop region first"
                   : `Trim to ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} (saves next to source)`
           }
-          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
-                     disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center gap-1.5 text-fg"
+          className={cn(
+            D.btn,
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center gap-1.5 text-fg",
+          )}
         >
           {editBusy === "trim" ? (
             <Loader2 size={14} className="animate-spin" />
@@ -439,9 +495,12 @@ export function Player({
                   ? "Drag a loop region first"
                   : `Delete ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} and save the remainder next to source`
           }
-          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
-                     disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center gap-1.5 text-fg"
+          className={cn(
+            D.btn,
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center gap-1.5 text-fg",
+          )}
         >
           {editBusy === "prune" ? (
             <Loader2 size={14} className="animate-spin" />
@@ -478,7 +537,8 @@ export function Player({
           onClick={toggleLoop}
           disabled={!file || loading}
           className={cn(
-            "ml-auto px-3 py-2 rounded-md flex items-center gap-1.5",
+            "ml-auto rounded-md flex items-center gap-1.5",
+            D.btn,
             "disabled:opacity-50 disabled:cursor-not-allowed",
             loop
               ? "bg-accent/20 text-accent"

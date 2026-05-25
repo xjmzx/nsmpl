@@ -10,8 +10,19 @@ import type { AudioFile, AudioInfo } from "./lib/tauri";
 import { loadIdentity, type Identity } from "./lib/nostr";
 
 const THEME_KEY = "smpl-tool.theme";
+const DENSITY_KEY = "smpl-tool.density";
+const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
+type Density = "slim" | "wide";
+type TracksVisible = 1 | 2;
+
+function loadDensity(): Density {
+  return localStorage.getItem(DENSITY_KEY) === "wide" ? "wide" : "slim";
+}
+function loadTracksVisible(): TracksVisible {
+  return localStorage.getItem(TRACKS_VISIBLE_KEY) === "1" ? 1 : 2;
+}
 
 interface ProfileMeta {
   name?: string;
@@ -48,7 +59,21 @@ export default function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [profile, setProfile] = useState<ProfileMeta | null>(null);
   const [theme, setTheme] = useState<Theme>(loadTheme);
+  const [density, setDensity] = useState<Density>(loadDensity);
+  const [tracksVisible, setTracksVisible] = useState<TracksVisible>(loadTracksVisible);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(DENSITY_KEY, density);
+  }, [density]);
+  useEffect(() => {
+    localStorage.setItem(TRACKS_VISIBLE_KEY, String(tracksVisible));
+  }, [tracksVisible]);
+
+  function pickTracksVisible(n: TracksVisible) {
+    setTracksVisible(n);
+    if (n === 1 && focused === 1) setFocused(0);
+  }
 
   function loadIntoFocused(f: AudioFile) {
     setFiles((prev) => {
@@ -194,19 +219,23 @@ export default function App() {
           <Player
             file={files[0]}
             label="1"
-            focused={focused === 0}
+            focused={tracksVisible === 2 && focused === 0}
             onFocus={() => setFocused(0)}
             onAudioInfo={(i) => setAudioInfoFor(0, i)}
             onEdited={() => setEditCount((n) => n + 1)}
+            density={density}
           />
-          <Player
-            file={files[1]}
-            label="2"
-            focused={focused === 1}
-            onFocus={() => setFocused(1)}
-            onAudioInfo={(i) => setAudioInfoFor(1, i)}
-            onEdited={() => setEditCount((n) => n + 1)}
-          />
+          {tracksVisible === 2 && (
+            <Player
+              file={files[1]}
+              label="2"
+              focused={focused === 1}
+              onFocus={() => setFocused(1)}
+              onAudioInfo={(i) => setAudioInfoFor(1, i)}
+              onEdited={() => setEditCount((n) => n + 1)}
+              density={density}
+            />
+          )}
           <NostrPanel
             file={focusedFile}
             identity={identity}
@@ -218,7 +247,26 @@ export default function App() {
       <footer className="rounded-lg bg-panel border border-surface/60 px-4 py-2
                          flex flex-wrap items-center justify-between
                          gap-x-8 gap-y-1 text-xs text-muted">
-        <span>stack: Tauri 2 + React + TS + Tailwind</span>
+        <div className="inline-flex items-center gap-3">
+          <Segmented
+            label="view"
+            value={density}
+            options={[
+              { value: "slim", label: "slim" },
+              { value: "wide", label: "wide" },
+            ]}
+            onChange={setDensity}
+          />
+          <Segmented
+            label="tracks"
+            value={tracksVisible}
+            options={[
+              { value: 1, label: "1" },
+              { value: 2, label: "2" },
+            ]}
+            onChange={pickTracksVisible}
+          />
+        </div>
 
         {/* Centered identity chip — same 3-chip pattern as ndisc /
             ndisc.blobtree. */}
@@ -262,5 +310,43 @@ export default function App() {
         )}
       </footer>
     </div>
+  );
+}
+
+function Segmented<T extends string | number>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-muted/70 text-[10px] uppercase tracking-wide">
+        {label}
+      </span>
+      <span className="inline-flex rounded-md overflow-hidden border border-surface/60">
+        {options.map((opt, i) => (
+          <button
+            key={String(opt.value)}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={
+              "px-2 py-0.5 text-[10px] transition-colors " +
+              (i > 0 ? "border-l border-surface/60 " : "") +
+              (value === opt.value
+                ? "bg-accent/20 text-accent"
+                : "text-muted hover:text-fg hover:bg-surface/40")
+            }
+          >
+            {opt.label}
+          </button>
+        ))}
+      </span>
+    </span>
   );
 }
