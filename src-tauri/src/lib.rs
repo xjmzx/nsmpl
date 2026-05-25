@@ -174,6 +174,71 @@ fn probe_duration(src: &str) -> Result<f64, String> {
         .map_err(|e| format!("could not parse duration '{s}': {e}"))
 }
 
+/// Fade the start of the source file in from silence over `duration`
+/// seconds via ffmpeg's `afade` filter. Re-encodes (filter can't
+/// stream-copy a per-sample gain ramp). Output: `{stem}-fadein.{ext}`
+/// next to source.
+#[tauri::command]
+fn fade_in_audio(src: String, duration: f64) -> Result<String, String> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(format!("invalid fade duration: {duration}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dst = next_available_output_path(src_path, "fadein")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-af", &format!("afade=t=in:ss=0:d={duration:.6}"),
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
+/// Fade the end of the source file out to silence over `duration`
+/// seconds via ffmpeg's `afade` filter. Requires the file's duration
+/// (ffprobe) to compute the fade start time. Re-encodes. Output:
+/// `{stem}-fadeout.{ext}` next to source.
+#[tauri::command]
+fn fade_out_audio(src: String, duration: f64) -> Result<String, String> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(format!("invalid fade duration: {duration}"));
+    }
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+    let dur = probe_duration(&src)?;
+    if duration >= dur {
+        return Err(format!(
+            "fade duration {duration:.3}s ≥ file duration {dur:.3}s"
+        ));
+    }
+    let st = dur - duration;
+    let dst = next_available_output_path(src_path, "fadeout")?;
+    let dst_str = dst.to_string_lossy().into_owned();
+
+    let res = run_ffmpeg(&[
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-i", &src,
+        "-af", &format!("afade=t=out:st={st:.6}:d={duration:.6}"),
+        &dst_str,
+    ]);
+    if let Err(e) = res {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+    Ok(dst_str)
+}
+
 /// Apply a linear-gain factor to the whole source file via ffmpeg's
 /// `volume` filter. Requires a re-encode (codec can't stream-copy a
 /// per-sample scale), so the output keeps the source's codec via
@@ -492,6 +557,8 @@ pub fn run() {
             trim_audio,
             prune_audio,
             gain_audio,
+            fade_in_audio,
+            fade_out_audio,
             get_identity,
             generate_identity,
             import_identity,

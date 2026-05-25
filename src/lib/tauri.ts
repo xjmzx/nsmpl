@@ -55,3 +55,21 @@ export async function gainAudio(
 ): Promise<string> {
   return invoke<string>("gain_audio", { src, gain });
 }
+
+/// Fade the start of the source in from silence over `duration`
+/// seconds. Writes `{stem}-fadein.{ext}` next to the source.
+export async function fadeInAudio(
+  src: string,
+  duration: number,
+): Promise<string> {
+  return invoke<string>("fade_in_audio", { src, duration });
+}
+
+/// Fade the end of the source out to silence over `duration` seconds.
+/// Writes `{stem}-fadeout.{ext}` next to the source.
+export async function fadeOutAudio(
+  src: string,
+  duration: number,
+): Promise<string> {
+  return invoke<string>("fade_out_audio", { src, duration });
+}

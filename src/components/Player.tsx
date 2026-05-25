@@ -7,6 +7,8 @@ import {
   Repeat,
   Scissors,
   Square,
+  TrendingDown,
+  TrendingUp,
   Volume2,
   X,
 } from "lucide-react";
@@ -16,6 +18,8 @@ import RegionsPlugin, {
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { Section } from "./Section";
 import {
+  fadeInAudio,
+  fadeOutAudio,
   gainAudio,
   pruneAudio,
   readAudioFile,
@@ -62,7 +66,7 @@ const DENSITY = {
   },
 } as const;
 
-type EditMode = "trim" | "prune" | "gain";
+type EditMode = "trim" | "prune" | "gain" | "fadein" | "fadeout";
 type EditStatus =
   | { kind: "ok"; mode: EditMode; path: string }
   | { kind: "err"; mode: EditMode; msg: string };
@@ -150,6 +154,8 @@ export function Player({
   const [editStatus, setEditStatus] = useState<EditStatus | null>(null);
   // dB value the user wants to apply on the next "Gain" click.
   const [gainDb, setGainDb] = useState(0);
+  // Shared fade duration (seconds) for both fade-in and fade-out.
+  const [fadeDur, setFadeDur] = useState(1.0);
 
   // Reset edit feedback when the user switches samples.
   useEffect(() => {
@@ -187,6 +193,22 @@ export function Player({
       onEdited?.(path);
     } catch (e) {
       setEditStatus({ kind: "err", mode: "gain", msg: String(e) });
+    } finally {
+      setEditBusy(null);
+    }
+  }
+
+  async function runFade(direction: "fadein" | "fadeout") {
+    if (!file || editBusy) return;
+    setEditBusy(direction);
+    setEditStatus(null);
+    try {
+      const fn = direction === "fadein" ? fadeInAudio : fadeOutAudio;
+      const path = await fn(file.path, fadeDur);
+      setEditStatus({ kind: "ok", mode: direction, path });
+      onEdited?.(path);
+    } catch (e) {
+      setEditStatus({ kind: "err", mode: direction, msg: String(e) });
     } finally {
       setEditBusy(null);
     }
@@ -599,6 +621,85 @@ export function Player({
               <Loader2 size={14} className="animate-spin" />
             ) : null}
             Gain
+          </button>
+        </div>
+
+        {/* Fade: shared duration slider + separate fade-in / fade-out
+            apply buttons. Each writes to *-fadein.{ext} / *-fadeout.{ext}. */}
+        <div
+          className={cn(
+            "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
+            (!file || editBusy !== null) && "opacity-50",
+          )}
+          title={
+            !file
+              ? "Load a sample first"
+              : `Fade duration: ${fadeDur.toFixed(2)}s`
+          }
+        >
+          <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
+            <input
+              type="range"
+              min={0.05}
+              max={10}
+              step={0.05}
+              value={fadeDur}
+              onChange={(e) => setFadeDur(parseFloat(e.target.value))}
+              disabled={!file || editBusy !== null}
+              aria-label="Fade duration in seconds"
+              className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
+            />
+            <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
+              {fadeDur.toFixed(2)}s
+            </span>
+          </div>
+          <button
+            onClick={() => runFade("fadein")}
+            disabled={!file || editBusy !== null}
+            title={
+              editBusy === "fadein"
+                ? "Fading in…"
+                : !file
+                  ? "Load a sample first"
+                  : `Fade in over ${fadeDur.toFixed(2)}s and save next to source`
+            }
+            className={cn(
+              D.btn,
+              "border-l border-bg/40 text-fg",
+              "hover:bg-surfaceHover disabled:cursor-not-allowed",
+              "flex items-center gap-1.5",
+            )}
+          >
+            {editBusy === "fadein" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <TrendingUp size={14} />
+            )}
+            Fade in
+          </button>
+          <button
+            onClick={() => runFade("fadeout")}
+            disabled={!file || editBusy !== null}
+            title={
+              editBusy === "fadeout"
+                ? "Fading out…"
+                : !file
+                  ? "Load a sample first"
+                  : `Fade out over ${fadeDur.toFixed(2)}s and save next to source`
+            }
+            className={cn(
+              D.btn,
+              "border-l border-bg/40 text-fg",
+              "hover:bg-surfaceHover disabled:cursor-not-allowed",
+              "flex items-center gap-1.5",
+            )}
+          >
+            {editBusy === "fadeout" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <TrendingDown size={14} />
+            )}
+            Fade out
           </button>
         </div>
 
