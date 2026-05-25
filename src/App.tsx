@@ -214,8 +214,11 @@ export default function App() {
         </div>
 
         {/* Right column: two tracks + publish. FileBrowser clicks load
-            into whichever track is focused (ring-highlighted). */}
-        <div className="grid grid-cols-1 gap-4">
+            into whichever track is focused (ring-highlighted). `content-start`
+            stops the grid from distributing extra column height across rows,
+            so sections are intrinsic-height and don't grow empty space below
+            their content; any leftover height ends up below the last card. */}
+        <div className="grid grid-cols-1 gap-4 content-start">
           <Player
             file={files[0]}
             label="1"
