@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Crop,
+  Gauge,
   Loader2,
   Pause,
   Play,
@@ -18,6 +19,7 @@ import RegionsPlugin, {
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { Section } from "./Section";
 import {
+  detectBpm,
   fadeInAudio,
   fadeOutAudio,
   gainAudio,
@@ -161,6 +163,44 @@ export function Player({
   const [gainDb, setGainDb] = useState(0);
   // Shared fade duration (seconds) for both fade-in and fade-out.
   const [fadeDur, setFadeDur] = useState(1.0);
+
+  // ---- BPM detection (aubio) --------------------------------------
+  // Cleared when the source file changes OR when the loop region's
+  // presence changes (added or removed) — small region resizes keep
+  // the previously-detected value but a fresh selection invalidates.
+  const [bpm, setBpm] = useState<number | null>(null);
+  const [bpmBusy, setBpmBusy] = useState(false);
+  const [bpmError, setBpmError] = useState<string | null>(null);
+  useEffect(() => {
+    setBpm(null);
+    setBpmError(null);
+  }, [file?.path]);
+  const hadRegionRef = useRef(false);
+  useEffect(() => {
+    const has = !!regionRange;
+    if (has !== hadRegionRef.current) {
+      setBpm(null);
+      setBpmError(null);
+      hadRegionRef.current = has;
+    }
+  }, [regionRange]);
+
+  async function runDetectBpm() {
+    if (!file || bpmBusy) return;
+    setBpmBusy(true);
+    setBpmError(null);
+    try {
+      const v = await detectBpm(
+        file.path,
+        regionRange ? { start: regionRange.start, end: regionRange.end } : undefined,
+      );
+      setBpm(v);
+    } catch (e) {
+      setBpmError(String(e));
+    } finally {
+      setBpmBusy(false);
+    }
+  }
 
   // Reset edit feedback when the user switches samples.
   useEffect(() => {
@@ -550,6 +590,51 @@ export function Player({
             </button>
           </div>
         )}
+
+        {/* BPM detection chip: click to detect on the current region
+            (or whole file if no region). Re-click to redetect. */}
+        <button
+          onClick={runDetectBpm}
+          disabled={!file || bpmBusy}
+          title={
+            bpmBusy
+              ? "Detecting BPM…"
+              : bpmError
+                ? `BPM detection failed: ${bpmError}`
+                : !file
+                  ? "Load a sample first"
+                  : bpm
+                    ? `BPM (${regionRange ? "region" : "file"}): ${bpm.toFixed(2)} — click to redetect`
+                    : `Detect BPM (${regionRange ? "region" : "whole file"})`
+          }
+          className={cn(
+            "px-2 py-1 rounded-md bg-bg/50 hover:bg-surface/60",
+            "text-[10px] font-mono inline-flex items-center gap-1.5",
+            "disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+          )}
+        >
+          {bpmBusy ? (
+            <Loader2 size={11} className="animate-spin text-muted" />
+          ) : (
+            <Gauge
+              size={11}
+              className={bpmError ? "text-alert" : "text-muted"}
+            />
+          )}
+          <span className="text-muted">BPM</span>
+          <span
+            className={cn(
+              "tabular-nums",
+              bpm
+                ? "text-mauve"
+                : bpmError
+                  ? "text-alert"
+                  : "text-muted/60",
+            )}
+          >
+            {bpmError ? "err" : bpm ? bpm.toFixed(1) : "—"}
+          </span>
+        </button>
 
         <div className="ml-auto flex items-center gap-2">
           <div

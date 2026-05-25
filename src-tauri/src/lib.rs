@@ -269,6 +269,106 @@ fn gain_audio(src: String, gain: f64) -> Result<String, String> {
     Ok(dst_str)
 }
 
+/// Detect tempo (BPM) via `aubio tempo`. If `start` and `end` are
+/// both provided, the region is extracted to a temp WAV first so the
+/// estimate reflects what the user is looping; otherwise the source
+/// is analysed whole. aubio prints beat timestamps; we compute
+/// inter-beat intervals and return 60 / median.
+#[tauri::command]
+fn detect_bpm(
+    src: String,
+    start: Option<f64>,
+    end: Option<f64>,
+) -> Result<f64, String> {
+    let src_path = Path::new(&src);
+    if !src_path.is_file() {
+        return Err(format!("not a file: {src}"));
+    }
+
+    // Region present → extract to a temp WAV (PCM 16-bit, which aubio
+    // handles reliably regardless of source codec).
+    let region_temp: Option<PathBuf> = match (start, end) {
+        (Some(s), Some(e)) => {
+            if !s.is_finite() || !e.is_finite() || s < 0.0 || e <= s {
+                return Err(format!("invalid region: start={s}, end={e}"));
+            }
+            let stamp = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let temp = std::env::temp_dir().join(format!("smpl-bpm-{stamp}.wav"));
+            let temp_str = temp
+                .to_str()
+                .ok_or("temp path not utf-8")?
+                .to_string();
+            let res = run_ffmpeg(&[
+                "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", &format!("{s:.6}"),
+                "-to", &format!("{e:.6}"),
+                "-i", &src,
+                "-c:a", "pcm_s16le",
+                &temp_str,
+            ]);
+            if let Err(e) = res {
+                let _ = fs::remove_file(&temp);
+                return Err(format!("region extract failed: {e}"));
+            }
+            Some(temp)
+        }
+        _ => None,
+    };
+
+    let analysis_path = match &region_temp {
+        Some(p) => p.to_string_lossy().into_owned(),
+        None => src.clone(),
+    };
+
+    let output = Command::new("aubio")
+        .args(["tempo", &analysis_path])
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "aubio not found on PATH — install aubio-tools".to_string()
+            } else {
+                format!("aubio launch failed: {e}")
+            }
+        });
+
+    // Always clean up the temp region file, even on failure paths.
+    if let Some(p) = region_temp {
+        let _ = fs::remove_file(&p);
+    }
+
+    let output = output?;
+    if !output.status.success() {
+        return Err(format!(
+            "aubio failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    // aubio tempo prints one beat timestamp per line. Take inter-beat
+    // intervals, sort, return 60 / median.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let beats: Vec<f64> = stdout
+        .lines()
+        .filter_map(|l| l.trim().parse::<f64>().ok())
+        .collect();
+    if beats.len() < 2 {
+        return Err(format!(
+            "aubio found {} beats — too few to estimate BPM",
+            beats.len()
+        ));
+    }
+    let mut intervals: Vec<f64> = beats.windows(2).map(|w| w[1] - w[0]).collect();
+    intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = intervals[intervals.len() / 2];
+    if median <= 0.0 {
+        return Err("median beat interval is zero".into());
+    }
+    Ok(60.0 / median)
+}
+
 /// Trim a source audio file to `[start, end]` seconds via ffmpeg
 /// stream-copy. Sample-accurate on WAV/AIFF; frame-boundary accurate on
 /// FLAC; packet-boundary (~20ms) on lossy codecs. Output is written
@@ -559,6 +659,7 @@ pub fn run() {
             gain_audio,
             fade_in_audio,
             fade_out_audio,
+            detect_bpm,
             get_identity,
             generate_identity,
             import_identity,

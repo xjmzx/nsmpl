@@ -73,3 +73,18 @@ export async function fadeOutAudio(
 ): Promise<string> {
   return invoke<string>("fade_out_audio", { src, duration });
 }
+
+/// Detect BPM via `aubio tempo`. If `region` is supplied, that slice
+/// of the source is extracted to a temp WAV first so the estimate
+/// reflects the loop the user is auditioning. Resolves to the
+/// estimated BPM (positive float).
+export async function detectBpm(
+  src: string,
+  region?: { start: number; end: number },
+): Promise<number> {
+  return invoke<number>("detect_bpm", {
+    src,
+    start: region?.start ?? null,
+    end: region?.end ?? null,
+  });
+}
