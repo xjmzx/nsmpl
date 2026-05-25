@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, KeyRound, Lock } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  Lock,
+  Sliders,
+} from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
 import { FileBrowser } from "./components/FileBrowser";
@@ -15,6 +21,7 @@ const DENSITY_KEY = "smpl-tool.density";
 const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";
 const NIP_EXPANDED_KEY = "smpl-tool.nip.expanded";
 const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
+const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
 type Density = "slim" | "wide";
@@ -85,6 +92,9 @@ export default function App() {
   const [nipExpanded, setNipExpanded] = useState<boolean>(
     () => localStorage.getItem(NIP_EXPANDED_KEY) === "1",
   );
+  const [editsExpanded, setEditsExpanded] = useState<boolean>(
+    () => localStorage.getItem(EDITS_EXPANDED_KEY) === "1",
+  );
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -96,6 +106,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(NIP_EXPANDED_KEY, nipExpanded ? "1" : "0");
   }, [nipExpanded]);
+  useEffect(() => {
+    localStorage.setItem(EDITS_EXPANDED_KEY, editsExpanded ? "1" : "0");
+  }, [editsExpanded]);
 
   // Persist current track file paths whenever they change.
   useEffect(() => {
@@ -300,6 +313,25 @@ export default function App() {
             ]}
             onChange={pickTracksVisible}
           />
+          <button
+            type="button"
+            onClick={() => setEditsExpanded((p) => !p)}
+            aria-pressed={editsExpanded}
+            title={
+              editsExpanded
+                ? "Hide the destructive-edits row (Trim/Prune/Gain/Fade) on each Track"
+                : "Show the destructive-edits row (Trim/Prune/Gain/Fade) on each Track"
+            }
+            className={
+              "px-2.5 py-2 rounded-md text-xs font-mono inline-flex items-center gap-1.5 transition-colors " +
+              (editsExpanded
+                ? "bg-mauve text-bg"
+                : "bg-surface text-muted hover:text-mauve hover:bg-mauve/15")
+            }
+          >
+            <Sliders size={12} />
+            edits
+          </button>
         </div>
       </header>
 
@@ -333,6 +365,7 @@ export default function App() {
             onAudioInfo={(i) => setAudioInfoFor(0, i)}
             onEdited={() => setEditCount((n) => n + 1)}
             density={density}
+            editsExpanded={editsExpanded}
           />
           {tracksVisible === 2 && (
             <Player
@@ -343,6 +376,7 @@ export default function App() {
               onAudioInfo={(i) => setAudioInfoFor(1, i)}
               onEdited={() => setEditCount((n) => n + 1)}
               density={density}
+              editsExpanded={editsExpanded}
             />
           )}
           <NostrPanel file={focusedFile} identity={identity} />

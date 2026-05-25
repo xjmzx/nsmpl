@@ -47,6 +47,10 @@ interface PlayerProps {
   // "wide" matches the original layout with a separate filename row
   // and taller waveform/buttons.
   density?: "slim" | "wide";
+  // Show the destructive-edits row (Trim/Prune/Gain/Fade). Default
+  // collapsed — the deck-first UX keeps transport prominent and edits
+  // out of the way.
+  editsExpanded?: boolean;
 }
 
 // Density-dependent classNames + waveform pixel height. Slim is the
@@ -114,6 +118,7 @@ export function Player({
   focused,
   onFocus,
   density = "slim",
+  editsExpanded = false,
 }: PlayerProps) {
   const D = DENSITY[density];
   const containerRef = useRef<HTMLDivElement>(null);
@@ -492,6 +497,8 @@ export function Player({
         </pre>
       )}
 
+      {/* Transport row — always visible. Deck-first layout: playback,
+          region readout, volume, loop. */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={playing ? pause : play}
@@ -520,188 +527,6 @@ export function Player({
         >
           <Square size={14} /> Stop
         </button>
-
-        <button
-          onClick={() => runEdit("trim")}
-          disabled={editDisabled}
-          title={
-            editBusy === "trim"
-              ? "Trimming…"
-              : !file
-                ? "Load a sample first"
-                : !regionRange
-                  ? "Drag a loop region first"
-                  : `Trim to ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} (saves next to source)`
-          }
-          className={cn(
-            D.btn,
-            "rounded-md bg-surface hover:bg-surfaceHover",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center gap-1.5 text-fg",
-          )}
-        >
-          {editBusy === "trim" ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Crop size={14} />
-          )}
-          Trim
-        </button>
-        <button
-          onClick={() => runEdit("prune")}
-          disabled={editDisabled}
-          title={
-            editBusy === "prune"
-              ? "Pruning…"
-              : !file
-                ? "Load a sample first"
-                : !regionRange
-                  ? "Drag a loop region first"
-                  : `Delete ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} and save the remainder next to source`
-          }
-          className={cn(
-            D.btn,
-            "rounded-md bg-surface hover:bg-surfaceHover",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center gap-1.5 text-fg",
-          )}
-        >
-          {editBusy === "prune" ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Scissors size={14} />
-          )}
-          Prune
-        </button>
-
-        {/* Gain: slider with dB readout + apply button, joined as a
-            single compact chip. Range −24..+24 dB, step 0.5 dB. */}
-        <div
-          className={cn(
-            "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
-            (!file || editBusy !== null) && "opacity-50",
-          )}
-          title={
-            editBusy === "gain"
-              ? "Applying gain…"
-              : !file
-                ? "Load a sample first"
-                : `Apply ${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)} dB and save next to source`
-          }
-        >
-          <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
-            <Volume2 size={12} className="text-muted shrink-0" />
-            <input
-              type="range"
-              min={-24}
-              max={24}
-              step={0.5}
-              value={gainDb}
-              onChange={(e) => setGainDb(parseFloat(e.target.value))}
-              disabled={!file || editBusy !== null}
-              aria-label="Gain in dB"
-              className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
-            />
-            <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
-              {gainDb >= 0 ? "+" : ""}
-              {gainDb.toFixed(1)}
-            </span>
-          </div>
-          <button
-            onClick={runGain}
-            disabled={!file || editBusy !== null}
-            className={cn(
-              D.btn,
-              "border-l border-bg/40 text-fg",
-              "hover:bg-surfaceHover disabled:cursor-not-allowed",
-              "flex items-center gap-1.5",
-            )}
-          >
-            {editBusy === "gain" ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : null}
-            Gain
-          </button>
-        </div>
-
-        {/* Fade: shared duration slider + separate fade-in / fade-out
-            apply buttons. Each writes to *-fadein.{ext} / *-fadeout.{ext}. */}
-        <div
-          className={cn(
-            "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
-            (!file || editBusy !== null) && "opacity-50",
-          )}
-          title={
-            !file
-              ? "Load a sample first"
-              : `Fade duration: ${fadeDur.toFixed(2)}s`
-          }
-        >
-          <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
-            <input
-              type="range"
-              min={0.05}
-              max={10}
-              step={0.05}
-              value={fadeDur}
-              onChange={(e) => setFadeDur(parseFloat(e.target.value))}
-              disabled={!file || editBusy !== null}
-              aria-label="Fade duration in seconds"
-              className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
-            />
-            <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
-              {fadeDur.toFixed(2)}s
-            </span>
-          </div>
-          <button
-            onClick={() => runFade("fadein")}
-            disabled={!file || editBusy !== null}
-            title={
-              editBusy === "fadein"
-                ? "Fading in…"
-                : !file
-                  ? "Load a sample first"
-                  : `Fade in over ${fadeDur.toFixed(2)}s and save next to source`
-            }
-            className={cn(
-              D.btn,
-              "border-l border-bg/40 text-fg",
-              "hover:bg-surfaceHover disabled:cursor-not-allowed",
-              "flex items-center gap-1.5",
-            )}
-          >
-            {editBusy === "fadein" ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <TrendingUp size={14} />
-            )}
-            Fade in
-          </button>
-          <button
-            onClick={() => runFade("fadeout")}
-            disabled={!file || editBusy !== null}
-            title={
-              editBusy === "fadeout"
-                ? "Fading out…"
-                : !file
-                  ? "Load a sample first"
-                  : `Fade out over ${fadeDur.toFixed(2)}s and save next to source`
-            }
-            className={cn(
-              D.btn,
-              "border-l border-bg/40 text-fg",
-              "hover:bg-surfaceHover disabled:cursor-not-allowed",
-              "flex items-center gap-1.5",
-            )}
-          >
-            {editBusy === "fadeout" ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <TrendingDown size={14} />
-            )}
-            Fade out
-          </button>
-        </div>
 
         {regionRange && (
           <div
@@ -769,6 +594,193 @@ export function Player({
           </button>
         </div>
       </div>
+
+      {/* Edits row — conditional. Toggle in the header chip. */}
+      {editsExpanded && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => runEdit("trim")}
+            disabled={editDisabled}
+            title={
+              editBusy === "trim"
+                ? "Trimming…"
+                : !file
+                  ? "Load a sample first"
+                  : !regionRange
+                    ? "Drag a loop region first"
+                    : `Trim to ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} (saves next to source)`
+            }
+            className={cn(
+              D.btn,
+              "rounded-md bg-surface hover:bg-surfaceHover",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              "flex items-center gap-1.5 text-fg",
+            )}
+          >
+            {editBusy === "trim" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Crop size={14} />
+            )}
+            Trim
+          </button>
+          <button
+            onClick={() => runEdit("prune")}
+            disabled={editDisabled}
+            title={
+              editBusy === "prune"
+                ? "Pruning…"
+                : !file
+                  ? "Load a sample first"
+                  : !regionRange
+                    ? "Drag a loop region first"
+                    : `Delete ${fmtSecs(regionRange.start)} → ${fmtSecs(regionRange.end)} and save the remainder next to source`
+            }
+            className={cn(
+              D.btn,
+              "rounded-md bg-surface hover:bg-surfaceHover",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              "flex items-center gap-1.5 text-fg",
+            )}
+          >
+            {editBusy === "prune" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Scissors size={14} />
+            )}
+            Prune
+          </button>
+
+          {/* Gain: slider with dB readout + apply button, joined as a
+              single compact chip. Range −24..+24 dB, step 0.5 dB. */}
+          <div
+            className={cn(
+              "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
+              (!file || editBusy !== null) && "opacity-50",
+            )}
+            title={
+              editBusy === "gain"
+                ? "Applying gain…"
+                : !file
+                  ? "Load a sample first"
+                  : `Apply ${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)} dB and save next to source`
+            }
+          >
+            <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
+              <Volume2 size={12} className="text-muted shrink-0" />
+              <input
+                type="range"
+                min={-24}
+                max={24}
+                step={0.5}
+                value={gainDb}
+                onChange={(e) => setGainDb(parseFloat(e.target.value))}
+                disabled={!file || editBusy !== null}
+                aria-label="Gain in dB"
+                className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
+              />
+              <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
+                {gainDb >= 0 ? "+" : ""}
+                {gainDb.toFixed(1)}
+              </span>
+            </div>
+            <button
+              onClick={runGain}
+              disabled={!file || editBusy !== null}
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "gain" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : null}
+              Gain
+            </button>
+          </div>
+
+          {/* Fade: shared duration slider + separate fade-in / fade-out
+              apply buttons. Each writes to *-fadein.{ext} / *-fadeout.{ext}. */}
+          <div
+            className={cn(
+              "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
+              (!file || editBusy !== null) && "opacity-50",
+            )}
+            title={
+              !file
+                ? "Load a sample first"
+                : `Fade duration: ${fadeDur.toFixed(2)}s`
+            }
+          >
+            <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
+              <input
+                type="range"
+                min={0.05}
+                max={10}
+                step={0.05}
+                value={fadeDur}
+                onChange={(e) => setFadeDur(parseFloat(e.target.value))}
+                disabled={!file || editBusy !== null}
+                aria-label="Fade duration in seconds"
+                className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
+              />
+              <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
+                {fadeDur.toFixed(2)}s
+              </span>
+            </div>
+            <button
+              onClick={() => runFade("fadein")}
+              disabled={!file || editBusy !== null}
+              title={
+                editBusy === "fadein"
+                  ? "Fading in…"
+                  : !file
+                    ? "Load a sample first"
+                    : `Fade in over ${fadeDur.toFixed(2)}s and save next to source`
+              }
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "fadein" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <TrendingUp size={14} />
+              )}
+              Fade in
+            </button>
+            <button
+              onClick={() => runFade("fadeout")}
+              disabled={!file || editBusy !== null}
+              title={
+                editBusy === "fadeout"
+                  ? "Fading out…"
+                  : !file
+                    ? "Load a sample first"
+                    : `Fade out over ${fadeDur.toFixed(2)}s and save next to source`
+              }
+              className={cn(
+                D.btn,
+                "border-l border-bg/40 text-fg",
+                "hover:bg-surfaceHover disabled:cursor-not-allowed",
+                "flex items-center gap-1.5",
+              )}
+            >
+              {editBusy === "fadeout" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <TrendingDown size={14} />
+              )}
+              Fade out
+            </button>
+          </div>
+        </div>
+      )}
 
       {editStatus?.kind === "ok" && (
         <p className="text-xs text-ok font-mono break-all">
