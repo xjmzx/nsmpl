@@ -1,0 +1,93 @@
+name: Release
+
+# Fires on any pushed tag starting with `v` (e.g. v0.1.0, v0.2.0-beta) and
+# can also be kicked off manually via the Actions tab. Produces a draft
+# GitHub Release with .deb and .AppImage assets for Linux x86_64; the user
+# reviews and publishes the draft when satisfied.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0-beta)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    name: Build Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      # Action versions below run on the Node 24 Actions runtime
+      # (checkout v6, setup-node v6, action-gh-release v3). GitHub
+      # deprecated the Node 20 action runtime in 2025.
+      - uses: actions/checkout@v6
+
+      # Same packages listed in the README under "Install dependencies"
+      # plus libsecret-1-dev so the keyring crate links.
+      - name: Install Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsecret-1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            curl wget file
+
+      # `node-version` is the Node used to run the project build (vite/tsc),
+      # independent of the action's own Node 24 runtime. Node 20 LTS is kept
+      # here deliberately — changing the build toolchain is a separate call.
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm deps
+        run: npm ci
+
+      # Skip rpm — rpmbuild isn't installed on ubuntu runners and Fedora
+      # users can install from source if they need it.
+      - name: Build Tauri bundles (.deb + AppImage)
+        run: npm run tauri build -- --bundles deb,appimage
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Publishes the release directly (not as a draft) so the assets land
+      # on the tagged release in one step — no duplicate-record cleanup later.
+      # The `prerelease` flag is auto-set from the tag: anything with a hyphen
+      # (v0.1.0-beta, v0.2.0-rc.1) is a pre-release; plain `vX.Y.Z` isn't.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          generate_release_notes: true
+          files: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
