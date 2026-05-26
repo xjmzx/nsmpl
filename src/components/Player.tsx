@@ -31,7 +31,6 @@ import RegionsPlugin, {
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
 import { Section } from "./Section";
 import {
-  detectBpm,
   fadeInAudio,
   fadeOutAudio,
   fadeTailAudio,
@@ -126,6 +125,11 @@ export type PlayerHandle = {
   pause: () => void;
   stop: () => void;
   cue: () => void;
+  /// Playhead position within the active loop region (0 if at the
+  /// loop start, region.end - region.start at the loop end), or
+  /// just currentTime if no region is set. Master uses this so its
+  /// readout naturally resets when the loop wraps.
+  getLoopPosition: () => number;
 };
 type EditStatus =
   | { kind: "ok"; mode: EditMode; path: string }
@@ -226,16 +230,13 @@ function gridGradient(duration: number): string {
     .join(", ");
 }
 
-// Min sample / region length aubio gets a fair shot at — anything
-// shorter is just a hit, not a beat pattern.
-const BPM_MIN_DURATION = 5; // seconds
-
-// Master switch for the BPM-detection chip. Flip to true to wake the
-// click handler; left disabled while the median-of-intervals math is
-// too octave-confused on most real-world samples (see memory:
-// project_smpl_audio_backlog). Chip stays visible as a placeholder so
-// the feature isn't lost from view.
-const BPM_DETECTION_ENABLED = false;
+// Manual-bars BPM workaround while aubio-based auto detection
+// remains parked (see memory: project_smpl_audio_backlog). User
+// cycles through common bar-count assumptions and we compute
+// BPM = (bars × 4 ÷ loopLen) × 60, rounded.
+const BAR_OPTIONS = [1, 2, 4, 8, 16] as const;
+// Floor below which the calc is nonsense (one drum hit, not a loop).
+const BPM_MIN_DURATION = 0.1; // seconds
 
 export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   {
@@ -307,42 +308,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // Shared pad duration (seconds) for start/end/at-region inserts.
   const [padDur, setPadDur] = useState(1.0);
 
-  // ---- BPM detection (aubio) --------------------------------------
-  // Cleared when the source file changes OR when the loop region's
-  // presence changes (added or removed) — small region resizes keep
-  // the previously-detected value but a fresh selection invalidates.
-  const [bpm, setBpm] = useState<number | null>(null);
-  const [bpmBusy, setBpmBusy] = useState(false);
-  const [bpmError, setBpmError] = useState<string | null>(null);
-  useEffect(() => {
-    setBpm(null);
-    setBpmError(null);
-  }, [file?.path]);
-  const hadRegionRef = useRef(false);
-  useEffect(() => {
-    const has = !!regionRange;
-    if (has !== hadRegionRef.current) {
-      setBpm(null);
-      setBpmError(null);
-      hadRegionRef.current = has;
-    }
-  }, [regionRange]);
-
-  async function runDetectBpm() {
-    if (!file || bpmBusy) return;
-    setBpmBusy(true);
-    setBpmError(null);
-    try {
-      const v = await detectBpm(
-        file.path,
-        regionRange ? { start: regionRange.start, end: regionRange.end } : undefined,
-      );
-      setBpm(v);
-    } catch (e) {
-      setBpmError(String(e));
-    } finally {
-      setBpmBusy(false);
-    }
+  // ---- BPM (manual bars-based calc) -------------------------------
+  // User cycles through bar-count assumptions; we derive BPM from
+  // the current loop length. Survives file changes (user usually
+  // keeps the same expectation across loads).
+  const [loopBars, setLoopBars] = useState<number>(1);
+  function cycleLoopBars() {
+    const i = BAR_OPTIONS.indexOf(loopBars as 1 | 2 | 4 | 8 | 16);
+    setLoopBars(BAR_OPTIONS[(i + 1) % BAR_OPTIONS.length]);
   }
 
   // Reset edit feedback when the user switches samples.
@@ -683,7 +656,23 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // Expose the transport to the App-level "master" strip. Closures
   // read wsRef.current at call time, so the handle stays correct
   // across file loads.
-  useImperativeHandle(ref, () => ({ play, pause, stop, cue }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      play,
+      pause,
+      stop,
+      cue,
+      getLoopPosition: () => {
+        const ws = wsRef.current;
+        if (!ws) return 0;
+        const t = ws.getCurrentTime();
+        const start = activeRegionRef.current?.start ?? 0;
+        return Math.max(0, t - start);
+      },
+    }),
+    [],
+  );
 
   function toggleLoop() {
     setLoop((p) => !p);
@@ -858,35 +847,29 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           </button>
         )}
 
-        {/* BPM detection chip: click to detect on the current region
-            (or whole file if no region). Re-click to redetect. Muted
-            for samples (or selected regions) shorter than 5 s — too
-            little material for a stable tempo estimate. */}
+        {/* BPM (manual bars-based calc) — click to cycle through
+            bar-count assumptions (1, 2, 4, 8, 16 bars × 4 beats);
+            BPM = beats / loopLen × 60, rounded. Workaround until
+            aubio auto-detection is fixed up. */}
         {(() => {
-          const effDur = regionRange
+          const loopLen = regionRange
             ? regionRange.end - regionRange.start
             : duration;
-          const tooShort = !!file && effDur > 0 && effDur < BPM_MIN_DURATION;
+          const enoughMaterial =
+            !!file && loopLen > BPM_MIN_DURATION;
+          const calcBpm = enoughMaterial
+            ? Math.round(((loopBars * 4) / loopLen) * 60)
+            : null;
           return (
             <button
-              onClick={runDetectBpm}
-              disabled={
-                !BPM_DETECTION_ENABLED || !file || bpmBusy || tooShort
-              }
+              onClick={cycleLoopBars}
+              disabled={!file}
               title={
-                !BPM_DETECTION_ENABLED
-                  ? "BPM detection — experimental, currently disabled. The median-of-intervals math drifts on most real-world samples (octave-confused). Refinement queued in project memory."
-                  : bpmBusy
-                    ? "Detecting BPM…"
-                    : tooShort
-                      ? `${regionRange ? "Region" : "Sample"} shorter than ${BPM_MIN_DURATION}s — too little material for a stable BPM estimate`
-                      : bpmError
-                        ? `BPM detection failed: ${bpmError}`
-                        : !file
-                          ? "Load a sample first"
-                          : bpm
-                            ? `BPM (${regionRange ? "region" : "file"}): ${bpm.toFixed(2)} — click to redetect`
-                            : `Detect BPM (${regionRange ? "region" : "whole file"})`
+                !file
+                  ? "Load a sample first"
+                  : !enoughMaterial
+                    ? "Loop too short to estimate BPM"
+                    : `Assumes ${loopBars} bar${loopBars === 1 ? "" : "s"} of 4 beats in ${loopLen.toFixed(3)}s → ${calcBpm} BPM. Click to cycle bar count.`
               }
               className={cn(
                 "px-2 py-1 rounded-md bg-bg/50 hover:bg-surface/60",
@@ -894,26 +877,18 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                 "disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
               )}
             >
-              {bpmBusy ? (
-                <Loader2 size={11} className="animate-spin text-muted" />
-              ) : (
-                <Gauge
-                  size={11}
-                  className={bpmError ? "text-alert" : "text-muted"}
-                />
-              )}
+              <Gauge size={11} className="text-muted" />
               <span className="text-muted">BPM</span>
               <span
                 className={cn(
                   "tabular-nums",
-                  bpm
-                    ? "text-mauve"
-                    : bpmError
-                      ? "text-alert"
-                      : "text-muted/60",
+                  calcBpm ? "text-mauve" : "text-muted/60",
                 )}
               >
-                {bpmError ? "err" : bpm ? bpm.toFixed(1) : "—"}
+                {calcBpm ?? "—"}
+              </span>
+              <span className="text-muted/70 text-[9px] ml-0.5">
+                {loopBars}b
               </span>
             </button>
           );

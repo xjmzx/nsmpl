@@ -117,6 +117,13 @@ export default function App() {
   // manual refresh.
   const [editCount, setEditCount] = useState(0);
   const [identity, setIdentity] = useState<Identity | null>(null);
+  // Surfaces any failure from the loadIdentity → Rust get_identity
+  // call so we can actually see what's going wrong on the
+  // intermittent "doesn't remember nsec" complaint, instead of
+  // silently nulling.
+  const [identityLoadError, setIdentityLoadError] = useState<string | null>(
+    null,
+  );
   const [profile, setProfile] = useState<ProfileMeta | null>(null);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [density, setDensity] = useState<Density>(loadDensity);
@@ -217,49 +224,34 @@ export default function App() {
   const anyPlaying =
     trackPlaying[0] || (tracksVisible === 2 && trackPlaying[1]);
 
-  // ---- Master stopwatch ------------------------------------------
-  // Accumulates seconds while any track is playing; held value when
-  // paused/stopped; reset to 0 on master Cue. rAF-driven for sub-
-  // frame smoothness, refs for the timing book-keeping so React
-  // doesn't re-render on every tick.
+  // ---- Master time = loop position --------------------------------
+  // Polls each Player's playhead-within-loop via the imperative
+  // handle. Naturally resets when the loop wraps (currentTime jumps
+  // back to region.start → position back to 0). Display freezes
+  // when nothing is playing because the rAF only runs then.
   const [masterTime, setMasterTime] = useState(0);
   const masterRafRef = useRef(0);
-  const masterAccumRef = useRef(0);
-  const masterStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (anyPlaying) {
-      if (masterStartedAtRef.current === null) {
-        masterStartedAtRef.current = performance.now();
-        const tick = () => {
-          if (masterStartedAtRef.current === null) return;
-          const elapsed =
-            masterAccumRef.current +
-            (performance.now() - masterStartedAtRef.current) / 1000;
-          setMasterTime(elapsed);
-          masterRafRef.current = requestAnimationFrame(tick);
-        };
+      const tick = () => {
+        // Prefer whichever track is actively progressing. We use
+        // "non-zero" as a cheap proxy for "this track is the one
+        // moving" — for matched-loop pairs in sync they're equal,
+        // and the prefer-Track-0 fallback is harmless.
+        const p0 = player0Ref.current?.getLoopPosition() ?? 0;
+        const p1 = player1Ref.current?.getLoopPosition() ?? 0;
+        setMasterTime(p0 > 0 ? p0 : p1);
         masterRafRef.current = requestAnimationFrame(tick);
-      }
-    } else if (masterStartedAtRef.current !== null) {
-      masterAccumRef.current +=
-        (performance.now() - masterStartedAtRef.current) / 1000;
-      masterStartedAtRef.current = null;
-      cancelAnimationFrame(masterRafRef.current);
-      masterRafRef.current = 0;
+      };
+      masterRafRef.current = requestAnimationFrame(tick);
     }
     return () => {
-      if (masterRafRef.current) cancelAnimationFrame(masterRafRef.current);
+      if (masterRafRef.current) {
+        cancelAnimationFrame(masterRafRef.current);
+        masterRafRef.current = 0;
+      }
     };
   }, [anyPlaying]);
-  function resetMasterTimer() {
-    if (masterStartedAtRef.current !== null) {
-      cancelAnimationFrame(masterRafRef.current);
-      masterStartedAtRef.current = null;
-      masterRafRef.current = 0;
-    }
-    masterAccumRef.current = 0;
-    setMasterTime(0);
-  }
   async function handleForgetIdentity() {
     if (
       !confirm(
@@ -288,11 +280,15 @@ export default function App() {
   function stopBoth() {
     player0Ref.current?.stop();
     player1Ref.current?.stop();
+    // Both seek to region.start (or 0); loop position = 0.
+    setMasterTime(0);
   }
   function cueBoth() {
-    resetMasterTimer();
     player0Ref.current?.cue();
     player1Ref.current?.cue();
+    // Cue forces playheads to file 0; clamp the display to match
+    // (rAF is paused at this point, so explicit set is needed).
+    setMasterTime(0);
   }
 
   function loadIntoFocused(f: AudioFile) {
@@ -324,11 +320,22 @@ export default function App() {
     getVersion().then(setAppVersion).catch(() => setAppVersion(null));
   }, []);
 
-  // Hydrate identity from the OS keychain on mount.
+  // Hydrate identity from the OS keychain on mount. Capture the
+  // error rather than swallow it silently — surfaced in the
+  // NostrPanel logged-out view so the user can see why hydration
+  // failed instead of just landing on a logged-out screen with no
+  // explanation.
   useEffect(() => {
     loadIdentity()
-      .then(setIdentity)
-      .catch(() => setIdentity(null));
+      .then((id) => {
+        setIdentity(id);
+        setIdentityLoadError(null);
+      })
+      .catch((e) => {
+        setIdentity(null);
+        setIdentityLoadError(String(e));
+        console.error("loadIdentity failed:", e);
+      });
   }, []);
 
   // Best-effort kind:0 profile fetch for display_name / name.
@@ -570,6 +577,7 @@ export default function App() {
             file={focusedFile}
             identity={identity}
             setIdentity={setIdentity}
+            identityLoadError={identityLoadError}
           />
         </div>
       </div>
@@ -698,12 +706,12 @@ function MasterStrip({
           <Square size={14} fill="currentColor" />
         </button>
       </div>
-      {/* Master stopwatch — accumulates while any track is playing,
-          holds value on pause/stop, resets to 0 on Cue. tabular-nums
-          stops digit jitter as the rAF ticks. */}
+      {/* Master loop counter — large, bold, deck-display feel.
+          tabular-nums keeps the digits from jittering as the rAF
+          ticks at sub-ms speed. */}
       <span
-        className="font-mono text-ok tabular-nums text-xs"
-        title="Master time — running while any track is playing; resets to 0 on Cue."
+        className="font-mono font-bold text-3xl text-ok tabular-nums tracking-tight"
+        title="Master loop position — playhead time within the current loop; resets when the loop wraps and on Cue."
       >
         {fmtMasterTime(time)}
       </span>

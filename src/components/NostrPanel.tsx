@@ -83,12 +83,17 @@ interface NostrPanelProps {
   file: AudioFile | null;
   identity: Identity | null;
   setIdentity: (id: Identity | null) => void;
+  // Surfaced from App's loadIdentity catch — shown in the logged-out
+  // view so a keychain read failure is visible instead of silently
+  // landing the user on a paste-nsec screen with no clue why.
+  identityLoadError?: string | null;
 }
 
 export function NostrPanel({
   file,
   identity,
   setIdentity,
+  identityLoadError,
 }: NostrPanelProps) {
   const [expanded, setExpanded] = useState(
     () => localStorage.getItem(EXPANDED_KEY) === "1",
@@ -262,6 +267,11 @@ export function NostrPanel({
         onTitleClick={toggleExpanded}
         className="border-auburn/30"
       >
+        {identityLoadError && (
+          <p className="text-xs text-alert font-mono break-all bg-alert/10 px-2 py-1.5 rounded">
+            keychain read failed on startup: {identityLoadError}
+          </p>
+        )}
         <p className="text-xs text-muted">
           ndisc.smpl signs publishes with a Nostr keypair. Generate a new
           identity or paste an existing nsec — your secret key is stored
