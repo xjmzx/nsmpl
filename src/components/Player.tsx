@@ -21,6 +21,7 @@ import {
   Split,
   Square,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import WaveSurfer from "wavesurfer.js";
@@ -86,6 +87,11 @@ interface PlayerProps {
   // (idle / running / done / failed) shown under the transport row.
   onBounce?: () => void;
   bounceView?: BounceView;
+  /// Global mute applied from the master strip. When true, this
+  /// track is silent regardless of its own per-track mute toggle.
+  /// Independent state — App owns `masterMuted`, each Player owns
+  /// its own `muted`, the audio element uses the OR of both.
+  masterMuted?: boolean;
 }
 
 // Density-dependent classNames + waveform pixel height. Slim is the
@@ -141,6 +147,12 @@ export type PlayerHandle = {
   /// other at bounce time. App reads this + the other track's
   /// audible length to compute the apad/atrim target.
   getMatchOther: () => boolean;
+  /// Hard reset: destroys + recreates the WaveSurfer instance from
+  /// the currently loaded file. Recovers from any locked audio-engine
+  /// state. Preserves the user's file selection, fade values, match
+  /// toggle and volume; the loop region is cleared since it lives
+  /// inside the wavesurfer instance.
+  reset: () => void;
 };
 type EditStatus =
   | { kind: "ok"; mode: EditMode; path: string }
@@ -245,7 +257,11 @@ function gridGradient(duration: number): string {
 // remains parked (see memory: project_smpl_audio_backlog). User
 // cycles through common bar-count assumptions and we compute
 // BPM = (bars × 4 ÷ loopLen) × 60, rounded.
-const BAR_OPTIONS = [1, 2, 4, 8, 16] as const;
+// Half-bar entry lets users snap to 8th-note-style loops (drum
+// fills, half-bar phrases). 4 beats per bar is the 4/4 assumption
+// the BPM math is locked to.
+const BAR_OPTIONS = [0.5, 1, 2, 4, 8, 16] as const;
+type BarOption = (typeof BAR_OPTIONS)[number];
 // Floor below which the calc is nonsense (one drum hit, not a loop).
 const BPM_MIN_DURATION = 0.1; // seconds
 
@@ -266,6 +282,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     otherLabel,
     onBounce,
     bounceView,
+    masterMuted = false,
   },
   ref,
 ) {
@@ -331,6 +348,11 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // the bounce pads (apad) or trims (atrim) this track to the other
   // track's audible length at render time. Reset on file change.
   const [matchOther, setMatchOther] = useState(false);
+  // Bump this to force the WaveSurfer mount effect to re-run with
+  // the current file — used by Master Reset to recover from a
+  // wedged audio engine without losing the user's file/fade/match
+  // selections.
+  const [resetTick, setResetTick] = useState(0);
   // Ref pipes so the imperative handle's getters read the latest
   // values without re-binding the handle.
   const fadeInRef = useRef(fadeInSec);
@@ -346,8 +368,34 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // keeps the same expectation across loads).
   const [loopBars, setLoopBars] = useState<number>(1);
   function cycleLoopBars() {
-    const i = BAR_OPTIONS.indexOf(loopBars as 1 | 2 | 4 | 8 | 16);
+    const i = BAR_OPTIONS.indexOf(loopBars as BarOption);
     setLoopBars(BAR_OPTIONS[(i + 1) % BAR_OPTIONS.length]);
+  }
+
+  // Snap loop region to the next bar count in BAR_OPTIONS, preserving
+  // the current BPM. bar_dur = region_len / loopBars at click time, so
+  // after the resize the new loopBars × new bar_dur = new region_len
+  // gives the same BPM. Clamps end at file duration if the requested
+  // bar count would overflow the source.
+  function cycleAndSnapBars() {
+    const region = activeRegionRef.current;
+    if (!region || !regionRange) return;
+    const regionLen = regionRange.end - regionRange.start;
+    if (regionLen <= 0 || loopBars <= 0) return;
+    const barDur = regionLen / loopBars;
+    const i = BAR_OPTIONS.indexOf(loopBars as BarOption);
+    const next = BAR_OPTIONS[(i + 1) % BAR_OPTIONS.length];
+    const desiredEnd = regionRange.start + next * barDur;
+    const clampedEnd = Math.min(desiredEnd, duration);
+    region.setOptions({
+      start: regionRange.start,
+      end: clampedEnd,
+    });
+    setLoopBars(next);
+  }
+
+  function fmtBars(b: number): string {
+    return b === 0.5 ? "½" : `${b}`;
   }
 
   // Reset edit feedback when the user switches samples.
@@ -385,6 +433,18 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   useEffect(() => {
     wsRef.current?.setVolume(volume);
   }, [volume]);
+
+  // ---- mute (per-track + master) ---------------------------------
+  // Per-track toggle. Independent of volume so the user's slider
+  // value is preserved across mute/unmute. Effective mute is
+  // `muted || masterMuted` — either can silence the track.
+  const [muted, setMuted] = useState(false);
+  const effectiveMuted = muted || masterMuted;
+  const effectiveMutedRef = useRef(effectiveMuted);
+  effectiveMutedRef.current = effectiveMuted;
+  useEffect(() => {
+    wsRef.current?.setMuted(effectiveMuted);
+  }, [effectiveMuted]);
 
   // ---- envelope rAF -----------------------------------------------
   // While playing AND a fade is set, ride the volume continuously so
@@ -562,11 +622,12 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       setDuration(ws.getDuration());
       setLoading(false);
       regions.enableDragSelection({ color: REGION_FILL });
-      // Apply the current volume to the freshly-created element.
-      // Read via ref so we use the latest value (the effect dep list
-      // intentionally excludes `volume` — we don't want to rebuild ws
-      // on slider drags).
+      // Apply the current volume + mute to the freshly-created
+      // element. Read via refs so we use the latest values (the
+      // effect dep list intentionally excludes `volume` and `muted`
+      // — we don't want to rebuild ws on slider/toggle changes).
       ws.setVolume(volumeRef.current);
+      ws.setMuted(effectiveMutedRef.current);
     });
     ws.on("play", () => setPlaying(true));
     ws.on("pause", () => setPlaying(false));
@@ -644,7 +705,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       if (wsRef.current === ws) wsRef.current = null;
       if (regionsRef.current === regions) regionsRef.current = null;
     };
-  }, [file?.path, file?.name]);
+  }, [file?.path, file?.name, resetTick]);
 
   // ---- transport ---------------------------------------------------
   function play() {
@@ -717,6 +778,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         fadeOutSec: fadeOutRef.current,
       }),
       getMatchOther: () => matchOtherRef.current,
+      reset: () => setResetTick((n) => n + 1),
     }),
     [],
   );
@@ -768,8 +830,19 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         !expanded && "min-h-[5rem]",
       )}
     >
-      {expanded && (
-        <>
+      {/* Body is always rendered, only hidden via CSS when collapsed.
+          Unmounting on collapse used to detach the WaveSurfer container
+          and leave the engine pointed at a dead DOM node — the visible
+          symptom was play/pause silently no-op'ing after a
+          collapse+expand cycle. Keeping the DOM stable preserves
+          WaveSurfer's bindings, event listeners, rAF envelope loop and
+          all the rest of the per-track state. */}
+      <div
+        className={cn(
+          "flex flex-col gap-3",
+          !expanded && "hidden",
+        )}
+      >
       {density === "wide" && (
         <div className="text-xs text-muted truncate">
           {file ? file.name : "No sample loaded"}
@@ -908,10 +981,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           </button>
         )}
 
-        {/* BPM (manual bars-based calc) — click to cycle through
-            bar-count assumptions (1, 2, 4, 8, 16 bars × 4 beats);
-            BPM = beats / loopLen × 60, rounded. Workaround until
-            aubio auto-detection is fixed up. */}
+        {/* BPM + snap. The BPM chip cycles the bar-count *assumption*
+            for the current region (interpretive — region length stays
+            put, BPM number changes). The snap chip cycles the bar
+            count AND resizes the region to match the new bar count at
+            the current BPM (active — region length changes, BPM
+            stays). Once the user has dialled in the right BPM via the
+            BPM chip, the snap chip becomes the "loop every ½ / 1 / 2
+            / 4 / 8 / 16 bars" control. */}
         {(() => {
           const loopLen = regionRange
             ? regionRange.end - regionRange.start
@@ -922,6 +999,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             ? Math.round(((loopBars * 4) / loopLen) * 60)
             : null;
           return (
+            <>
             <button
               onClick={cycleLoopBars}
               disabled={!file}
@@ -930,7 +1008,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                   ? "Load a sample first"
                   : !enoughMaterial
                     ? "Loop too short to estimate BPM"
-                    : `Assumes ${loopBars} bar${loopBars === 1 ? "" : "s"} of 4 beats in ${loopLen.toFixed(3)}s → ${calcBpm} BPM. Click to cycle bar count.`
+                    : `Assumes ${fmtBars(loopBars)} bar${loopBars === 1 ? "" : "s"} of 4 beats in ${loopLen.toFixed(3)}s → ${calcBpm} BPM. Click to cycle bar-count assumption (interpretive — region length unchanged).`
               }
               className={cn(
                 "px-2 py-1 rounded-md bg-bg/50 hover:bg-surface/60",
@@ -949,9 +1027,44 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                 {calcBpm ?? "—"}
               </span>
               <span className="text-muted/70 text-[9px] ml-0.5">
-                {loopBars}b
+                {fmtBars(loopBars)}b
               </span>
             </button>
+
+            {/* Snap chip — cycles loopBars AND resizes the loop region
+                to match (preserving BPM). Requires a region: bar
+                duration is derived from current region_len / loopBars. */}
+            <button
+              onClick={cycleAndSnapBars}
+              disabled={!file || !regionRange || !enoughMaterial}
+              title={
+                !file
+                  ? "Load a sample first"
+                  : !regionRange
+                    ? "Drag a loop region first — snap resizes it to a bar count"
+                    : !enoughMaterial
+                      ? "Loop too short for bar-count snap"
+                      : (() => {
+                          const i = BAR_OPTIONS.indexOf(loopBars as BarOption);
+                          const next =
+                            BAR_OPTIONS[(i + 1) % BAR_OPTIONS.length];
+                          const barDur = loopLen / loopBars;
+                          const newLen = next * barDur;
+                          return `Snap loop region to ${fmtBars(next)} bar${next === 1 ? "" : "s"} (${newLen.toFixed(3)}s) at ${calcBpm} BPM. Click cycles to the next bar count.`;
+                        })()
+              }
+              className={cn(
+                "px-2 py-1 rounded-md bg-bg/50 hover:bg-accent/15",
+                "text-[10px] font-mono inline-flex items-center gap-1.5",
+                "text-accent disabled:opacity-50 disabled:cursor-not-allowed",
+                "transition-colors",
+              )}
+            >
+              <Repeat size={11} />
+              <span>snap</span>
+              <span className="tabular-nums">{fmtBars(loopBars)}b</span>
+            </button>
+            </>
           );
         })()}
 
@@ -1025,14 +1138,45 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Volume icon doubles as a mute toggle — click to silence
+              this track without disturbing the slider value. When the
+              master strip's mute is on, this icon also reflects the
+              silenced state (effectiveMuted) but only the per-track
+              `muted` state flips on click. */}
           <div
             className="inline-flex items-center gap-1.5"
-            title={`Volume: ${Math.round(volume * 100)}%`}
+            title={
+              !file
+                ? "Load a sample first"
+                : masterMuted
+                  ? "Master is muted — toggle master mute to hear the track"
+                  : muted
+                    ? "Muted — click to unmute"
+                    : `Volume: ${Math.round(volume * 100)}% — click the icon to mute`
+            }
           >
-            <Volume2
-              size={14}
-              className={cn(file ? "text-muted" : "text-muted/40")}
-            />
+            <button
+              type="button"
+              onClick={() => setMuted((p) => !p)}
+              disabled={!file || loading}
+              aria-label={muted ? "Unmute track" : "Mute track"}
+              aria-pressed={muted}
+              className={cn(
+                "rounded p-0.5 transition-colors",
+                "disabled:opacity-40 disabled:cursor-not-allowed",
+                effectiveMuted
+                  ? "text-alert hover:bg-alert/15"
+                  : file
+                    ? "text-muted hover:text-fg hover:bg-surface/60"
+                    : "text-muted/40",
+              )}
+            >
+              {effectiveMuted ? (
+                <VolumeX size={14} />
+              ) : (
+                <Volume2 size={14} />
+              )}
+            </button>
             <input
               type="range"
               min={0}
@@ -1311,8 +1455,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           {editStatus.msg}
         </pre>
       )}
-        </>
-      )}
+      </div>
     </Section>
   );
 });

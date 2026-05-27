@@ -9,9 +9,12 @@ import {
   LogOut,
   Pause,
   Play,
+  RotateCcw,
   SkipBack,
   Sliders,
   Square,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SimplePool } from "nostr-tools";
@@ -286,6 +289,23 @@ export default function App() {
     // (rAF is paused at this point, so explicit set is needed).
     setMasterTime(0);
   }
+
+  // Hard reset of both WaveSurfer instances. Recovers from any
+  // wedged audio-engine state (e.g. play/pause stops responding) by
+  // destroying + recreating each player from its current file.
+  // Preserves file selection, fade values, match toggle, and volume.
+  // Loop regions are lost (they live inside WaveSurfer).
+  function resetMaster() {
+    player0Ref.current?.reset();
+    player1Ref.current?.reset();
+    setMasterTime(0);
+  }
+
+  // Master mute — silences both tracks regardless of their per-track
+  // mute state (effective mute on each Player is `trackMuted ||
+  // masterMuted`). Session-only — never persisted to avoid a
+  // confusing "why is everything silent on launch?" failure mode.
+  const [masterMuted, setMasterMuted] = useState(false);
 
   // ---- Bounce / render mix ----------------------------------------
   // 4-state operation model so the UI can show a discrete signal for
@@ -611,6 +631,9 @@ export default function App() {
           onCue={cueBoth}
           onBounce={bounceMaster}
           bounceView={bounceView}
+          onReset={resetMaster}
+          muted={masterMuted}
+          onToggleMute={() => setMasterMuted((p) => !p)}
         />
       )}
 
@@ -641,6 +664,7 @@ export default function App() {
              2-track mode the MasterStrip's Bounce mixes both. */
           onBounce={tracksVisible === 1 ? () => bounceTrack(0) : undefined}
           bounceView={tracksVisible === 1 ? bounceView : undefined}
+          masterMuted={masterMuted}
         />
         {tracksVisible === 2 && (
           <Player
@@ -658,6 +682,7 @@ export default function App() {
             onToggleExpand={() => toggleTrackExpanded(1)}
             otherDuration={audioInfos[0]?.duration ?? null}
             otherLabel="1"
+            masterMuted={masterMuted}
           />
         )}
       </div>
@@ -751,6 +776,9 @@ function MasterStrip({
   onStop,
   onBounce,
   bounceView,
+  onReset,
+  muted,
+  onToggleMute,
 }: {
   playing: boolean;
   density: Density;
@@ -760,36 +788,56 @@ function MasterStrip({
   onStop: () => void;
   onBounce: () => void;
   bounceView: BounceView;
+  onReset: () => void;
+  muted: boolean;
+  onToggleMute: () => void;
 }) {
   const bounceBusy = bounceView.status === "running";
-  // Match the per-Track transport chip padding so master + track
-  // buttons align horizontally row to row.
-  const btn = density === "slim" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2";
-  // Card padding mirrors Section's (p-3 slim, p-4 wide) so the
-  // buttons inside the master card sit at the same x as the
-  // per-track transport chip inside its Section.
-  const cardPad = density === "slim" ? "p-3" : "p-4";
-  // Colours reversed from before: dark fill, mauve glyph (was
-  // mauve fill, dark glyph). Sits inside a full-width card that
-  // matches the Section card chrome rather than the old extending
-  // thin bar.
-  const masterBtn =
-    btn +
-    " rounded-md bg-surface text-mauve hover:bg-mauve/15 transition-colors" +
-    " flex items-center justify-center";
+  // Density still tweaks slightly — wide gets a hair more padding —
+  // but the master buttons now have their own intrinsic sizes
+  // regardless of the per-Track density. Master is the deck's primary
+  // control surface, so the transport row earns prominence over
+  // matching the per-Track button geometry.
+  const cardPad = density === "slim" ? "px-4 py-3" : "px-5 py-3.5";
+  // Three button size tiers:
+  //  - transport: 48px square, big icons — primary playback
+  //  - utility: 40px square, smaller icons — recovery / audio toggle
+  //  - bounce: 48px tall, label + icon — output action
+  const transportBtn =
+    "h-12 w-12 rounded-md bg-surface text-mauve hover:bg-mauve/15 " +
+    "transition-colors flex items-center justify-center shrink-0";
+  const utilityBtn =
+    "h-10 w-10 rounded-md transition-colors " +
+    "flex items-center justify-center shrink-0";
+  const bounceBtn =
+    "h-12 px-4 rounded-md bg-surface text-auburn hover:bg-auburn/15 " +
+    "transition-colors flex items-center gap-2 shrink-0 " +
+    "disabled:opacity-50 disabled:cursor-not-allowed";
   return (
     <div
-      className={`rounded-xl bg-panel border border-ok/30 shadow-md ${cardPad} flex items-center justify-between gap-3 min-h-[5rem]`}
+      className={cn(
+        "rounded-xl bg-panel border border-ok/30 shadow-md",
+        cardPad,
+        // Constrain width so the card stops being a stretched-out
+        // billboard. mx-auto centers it; breathing room is reserved
+        // for future master-level features (master fader, FX bus,
+        // tempo readout, etc.).
+        "max-w-[64rem] mx-auto",
+        "flex items-center gap-4",
+      )}
     >
+      {/* LEFT — Transport cluster. Big square buttons (48px) reading
+          left-to-right Cue → Play → Stop, matching deck conventions.
+          Tightly grouped so they read as a single transport unit. */}
       <div className="inline-flex gap-1">
         <button
           type="button"
           onClick={onCue}
           title="Cue both — pause both tracks and seek to start"
           aria-label="Cue both tracks"
-          className={masterBtn}
+          className={transportBtn}
         >
-          <SkipBack size={14} fill="currentColor" />
+          <SkipBack size={22} fill="currentColor" />
         </button>
         <button
           type="button"
@@ -797,12 +845,12 @@ function MasterStrip({
           title={playing ? "Pause both tracks" : "Play both tracks"}
           aria-label={playing ? "Pause both tracks" : "Play both tracks"}
           aria-pressed={playing}
-          className={masterBtn}
+          className={transportBtn}
         >
           {playing ? (
-            <Pause size={14} fill="currentColor" />
+            <Pause size={22} fill="currentColor" />
           ) : (
-            <Play size={14} fill="currentColor" />
+            <Play size={22} fill="currentColor" />
           )}
         </button>
         <button
@@ -810,25 +858,76 @@ function MasterStrip({
           onClick={onStop}
           title="Stop both tracks (pauses, returns each to its region start or 0)"
           aria-label="Stop both tracks"
-          className={masterBtn}
+          className={transportBtn}
         >
-          <Square size={14} fill="currentColor" />
+          <Square size={22} fill="currentColor" />
         </button>
       </div>
-      {/* Master loop counter — large, bold, deck-display feel.
-          tabular-nums keeps the digits from jittering as the rAF
-          ticks at sub-ms speed. */}
+
+      {/* LEFT-MID — Recovery utility. Reset is a "danger" action so
+          it sits apart from transport, tinted alert-red, slightly
+          smaller (40px) to read as secondary. */}
+      <button
+        type="button"
+        onClick={() => {
+          if (
+            confirm(
+              "Reset both tracks?\n\nThis recreates the audio engines for both decks. " +
+                "File selection, fades and match are preserved. Loop regions are cleared.",
+            )
+          ) {
+            onReset();
+          }
+        }}
+        title="Reset both audio engines — safety net if a track stops responding to play/stop"
+        aria-label="Reset both tracks"
+        className={cn(
+          utilityBtn,
+          "bg-surface text-alert hover:bg-alert/15",
+        )}
+      >
+        <RotateCcw size={18} />
+      </button>
+
+      {/* CENTER — Master loop counter. flex-1 makes it absorb the
+          slack between left and right clusters, centering the
+          readout. Larger type than per-Track (4xl vs 3xl) so the
+          counter dominates as the deck's focal point. */}
       <span
-        className="font-mono font-bold text-3xl text-ok tabular-nums tracking-tight"
+        className="flex-1 text-center font-mono font-bold text-4xl text-ok tabular-nums tracking-tight"
         title="Master loop position — playhead time within the current loop; resets when the loop wraps and on Cue."
       >
         {fmtMasterTime(time)}
       </span>
-      {/* Master Bounce — renders both tracks (each trimmed to its
-          loop region when set) into a fresh WAV next to Track 1.
-          Auburn tint borrowed from the Publish panel: both are
-          "file-out" actions. Error line below the strip shows the
-          last failure inline — auto-clears on the next attempt. */}
+
+      {/* RIGHT-MID — Master mute. Same 40px utility size as Reset;
+          tinted alert-red only when active to signal the silent
+          state. Per-track mute toggles are independent — this is
+          the global OR. */}
+      <button
+        type="button"
+        onClick={onToggleMute}
+        title={
+          muted
+            ? "Master mute on — both tracks silenced. Click to unmute."
+            : "Mute both tracks (master). Per-track mute states are preserved."
+        }
+        aria-label={muted ? "Unmute both tracks" : "Mute both tracks"}
+        aria-pressed={muted}
+        className={cn(
+          utilityBtn,
+          muted
+            ? "bg-alert/20 text-alert hover:bg-alert/30"
+            : "bg-surface text-mauve hover:bg-mauve/15",
+        )}
+      >
+        {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+      </button>
+
+      {/* RIGHT — Output. Bounce is the deck's "render to disk"
+          action; status line (running ticker / done filename /
+          failure error) renders directly below the button so the
+          whole output cluster reads as one visual block. */}
       <div className="flex flex-col items-end gap-1">
         <button
           type="button"
@@ -836,18 +935,14 @@ function MasterStrip({
           disabled={bounceBusy}
           title="Bounce mix — render both tracks' loop regions to a fresh WAV next to Track 1's source"
           aria-label="Bounce mix to WAV"
-          className={cn(
-            btn,
-            "rounded-md bg-surface text-auburn hover:bg-auburn/15 transition-colors",
-            "flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed",
-          )}
+          className={bounceBtn}
         >
           {bounceBusy ? (
-            <Loader2 size={14} className="animate-spin" />
+            <Loader2 size={18} className="animate-spin" />
           ) : (
-            <FileDown size={14} />
+            <FileDown size={18} />
           )}
-          <span className="text-[10px] font-mono uppercase tracking-wide">
+          <span className="text-xs font-mono uppercase tracking-wide">
             bounce
           </span>
         </button>
