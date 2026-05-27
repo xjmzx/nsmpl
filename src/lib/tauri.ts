@@ -56,39 +56,6 @@ export async function gainAudio(
   return invoke<string>("gain_audio", { src, gain });
 }
 
-/// Fade the start of the source in from silence over `duration`
-/// seconds. Writes `{stem}-fadein.{ext}` next to the source.
-export async function fadeInAudio(
-  src: string,
-  duration: number,
-): Promise<string> {
-  return invoke<string>("fade_in_audio", { src, duration });
-}
-
-/// Fade the end of the source out to silence over `duration` seconds.
-/// Writes `{stem}-fadeout.{ext}` next to the source.
-export async function fadeOutAudio(
-  src: string,
-  duration: number,
-): Promise<string> {
-  return invoke<string>("fade_out_audio", { src, duration });
-}
-
-/// Combined op: fade the end out over `fadeDuration` seconds AND
-/// append `tailDuration` seconds of pure silence. Writes
-/// `{stem}-fadetail.{ext}` next to the source.
-export async function fadeTailAudio(
-  src: string,
-  fadeDuration: number,
-  tailDuration: number,
-): Promise<string> {
-  return invoke<string>("fade_tail_audio", {
-    src,
-    fadeDuration,
-    tailDuration,
-  });
-}
-
 /// Detect BPM via `aubio tempo`. If `region` is supplied, that slice
 /// of the source is extracted to a temp WAV first so the estimate
 /// reflects the loop the user is auditioning. Resolves to the
@@ -136,9 +103,25 @@ export async function padAtAudio(
 /// Match the source's length to `targetDuration` seconds — pad-end
 /// if shorter, trim if longer. Writes `{stem}-match.{ext}` next to
 /// the source. Errors if already matched within 1 ms.
-export async function matchLengthAudio(
-  src: string,
-  targetDuration: number,
+/// Per-input parameters for renderMix. `region` is [start, end] in
+/// seconds or null for the full file. Fade values in seconds; 0 = no
+/// fade. `targetLenSec` is the non-destructive length-match target
+/// applied via apad+atrim at bounce; null = no length match. Mirrors
+/// the Rust `MixInput` struct.
+export interface MixInput {
+  src: string;
+  region: [number, number] | null;
+  fadeInSec: number;
+  fadeOutSec: number;
+  targetLenSec: number | null;
+}
+
+/// Bounce one or two tracks to a fresh WAV next to Track 1's source.
+/// Each track's loop region and non-destructive fade envelope bakes
+/// into the rendered file. Returns the absolute output path.
+export async function renderMix(
+  inputA: MixInput,
+  inputB: MixInput | null,
 ): Promise<string> {
-  return invoke<string>("match_length_audio", { src, targetDuration });
+  return invoke<string>("render_mix", { inputA, inputB });
 }

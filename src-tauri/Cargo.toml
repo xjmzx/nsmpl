@@ -1,6 +1,6 @@
 [package]
 name = "smpl-tool"
-version = "0.3.0-beta.3"
+version = "0.3.0-beta.4"
 description = "Local audio sample tool with Nostr publishing"
 authors = ["xjmzx"]
 edition = "2021"

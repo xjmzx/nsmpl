@@ -10,6 +10,7 @@ import {
   ArrowRightToLine,
   Crop,
   Equal,
+  FileDown,
   Gauge,
   Loader2,
   Pause,
@@ -19,8 +20,6 @@ import {
   SkipBack,
   Split,
   Square,
-  TrendingDown,
-  TrendingUp,
   Volume2,
   X,
 } from "lucide-react";
@@ -30,12 +29,10 @@ import RegionsPlugin, {
 } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
 import { Section } from "./Section";
+import { BounceStatus, type BounceView } from "./BounceStatus";
+import { EnvelopeStrip } from "./EnvelopeStrip";
 import {
-  fadeInAudio,
-  fadeOutAudio,
-  fadeTailAudio,
   gainAudio,
-  matchLengthAudio,
   padAtAudio,
   padEndAudio,
   padStartAudio,
@@ -82,6 +79,13 @@ interface PlayerProps {
   // null when there's no other visible track or it has no file loaded.
   otherDuration?: number | null;
   otherLabel?: string;
+  // Single-track Bounce. When provided, a Bounce button renders in
+  // the transport row that fires `onBounce` (App owns the IPC call).
+  // Omitted in 2-track mode — the MasterStrip's Bounce handles the
+  // mixed bounce instead. `bounceView` drives the inline status line
+  // (idle / running / done / failed) shown under the transport row.
+  onBounce?: () => void;
+  bounceView?: BounceView;
 }
 
 // Density-dependent classNames + waveform pixel height. Slim is the
@@ -108,13 +112,9 @@ type EditMode =
   | "trim"
   | "prune"
   | "gain"
-  | "fadein"
-  | "fadeout"
-  | "fadetail"
   | "padstart"
   | "padend"
-  | "padmid"
-  | "match";
+  | "padmid";
 
 /// Imperative handle exposed to App for the "master" between-tracks
 /// strip. Each fans out to one Player; the bare audio path already
@@ -130,6 +130,17 @@ export type PlayerHandle = {
   /// just currentTime if no region is set. Master uses this so its
   /// readout naturally resets when the loop wraps.
   getLoopPosition: () => number;
+  /// Current loop region in seconds, or null if no region is set.
+  /// Used by the master Bounce to render only the looped portion.
+  getLoopRange: () => { start: number; end: number } | null;
+  /// Current non-destructive fade lengths (seconds). 0 = no fade.
+  /// Read by the master Bounce so each track's envelope bakes into
+  /// the rendered WAV.
+  getFades: () => { fadeInSec: number; fadeOutSec: number };
+  /// True when the user has asked this track to length-match the
+  /// other at bounce time. App reads this + the other track's
+  /// audible length to compute the apad/atrim target.
+  getMatchOther: () => boolean;
 };
 type EditStatus =
   | { kind: "ok"; mode: EditMode; path: string }
@@ -253,9 +264,12 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     onToggleExpand,
     otherDuration = null,
     otherLabel,
+    onBounce,
+    bounceView,
   },
   ref,
 ) {
+  const bounceBusy = bounceView?.status === "running";
   const D = DENSITY[density];
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -303,10 +317,28 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   const [editStatus, setEditStatus] = useState<EditStatus | null>(null);
   // dB value the user wants to apply on the next "Gain" click.
   const [gainDb, setGainDb] = useState(0);
-  // Shared fade duration (seconds) for both fade-in and fade-out.
-  const [fadeDur, setFadeDur] = useState(1.0);
   // Shared pad duration (seconds) for start/end/at-region inserts.
   const [padDur, setPadDur] = useState(1.0);
+  // ---- non-destructive envelope (bake-at-bounce) ------------------
+  // Per-Track fade lengths the user drags out on the EnvelopeStrip.
+  // Live audio preview multiplies HTMLMediaElement.volume by the
+  // computed envelope multiplier; the values get baked into the
+  // ffmpeg filter chain at bounce time. Reset to 0 on file change
+  // — each new sample starts dry.
+  const [fadeInSec, setFadeInSec] = useState(0);
+  const [fadeOutSec, setFadeOutSec] = useState(0);
+  // Non-destructive "match the other track's length" flag. When true,
+  // the bounce pads (apad) or trims (atrim) this track to the other
+  // track's audible length at render time. Reset on file change.
+  const [matchOther, setMatchOther] = useState(false);
+  // Ref pipes so the imperative handle's getters read the latest
+  // values without re-binding the handle.
+  const fadeInRef = useRef(fadeInSec);
+  const fadeOutRef = useRef(fadeOutSec);
+  const matchOtherRef = useRef(matchOther);
+  fadeInRef.current = fadeInSec;
+  fadeOutRef.current = fadeOutSec;
+  matchOtherRef.current = matchOther;
 
   // ---- BPM (manual bars-based calc) -------------------------------
   // User cycles through bar-count assumptions; we derive BPM from
@@ -321,6 +353,15 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // Reset edit feedback when the user switches samples.
   useEffect(() => {
     setEditStatus(null);
+  }, [file?.path]);
+
+  // Reset envelope fades on file change — per-spec, each new sample
+  // is a clean slate. (Region change keeps the fade values; the
+  // envelope just re-targets to the new region length.)
+  useEffect(() => {
+    setFadeInSec(0);
+    setFadeOutSec(0);
+    setMatchOther(false);
   }, [file?.path]);
 
   // Resize the live waveform when density changes without re-decoding.
@@ -345,6 +386,48 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     wsRef.current?.setVolume(volume);
   }, [volume]);
 
+  // ---- envelope rAF -----------------------------------------------
+  // While playing AND a fade is set, ride the volume continuously so
+  // the user hears the same fade shape they'll get from the bounce.
+  // Uses HTMLMediaElement.volume (via WaveSurfer.setVolume) — no Web
+  // Audio nodes, so the WebKit2GTK mute issue doesn't apply.
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws) return;
+    if (!playing || (fadeInSec === 0 && fadeOutSec === 0)) {
+      // Either not playing or no envelope to ride — make sure volume
+      // is at the dry user-set value.
+      ws.setVolume(volume);
+      return;
+    }
+    let raf = 0;
+    function tick() {
+      const ws = wsRef.current;
+      if (!ws) return;
+      const region = activeRegionRef.current;
+      const regionStart = region?.start ?? 0;
+      const regionEnd = region?.end ?? duration;
+      const len = regionEnd - regionStart;
+      const tInRegion = Math.max(0, ws.getCurrentTime() - regionStart);
+      let m = 1;
+      if (fadeInSec > 0 && tInRegion < fadeInSec) {
+        m *= tInRegion / fadeInSec;
+      }
+      if (fadeOutSec > 0 && tInRegion > len - fadeOutSec) {
+        m *= Math.max(0, (len - tInRegion) / fadeOutSec);
+      }
+      ws.setVolume(volume * Math.max(0, Math.min(1, m)));
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      // Restore the dry volume on cleanup so the slider value is
+      // honoured next time the rAF isn't running.
+      wsRef.current?.setVolume(volume);
+    };
+  }, [playing, fadeInSec, fadeOutSec, volume, duration]);
+
   async function runGain() {
     if (!file || editBusy) return;
     setEditBusy("gain");
@@ -356,52 +439,6 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       onEdited?.(path);
     } catch (e) {
       setEditStatus({ kind: "err", mode: "gain", msg: String(e) });
-    } finally {
-      setEditBusy(null);
-    }
-  }
-
-  async function runFade(direction: "fadein" | "fadeout") {
-    if (!file || editBusy) return;
-    setEditBusy(direction);
-    setEditStatus(null);
-    try {
-      const fn = direction === "fadein" ? fadeInAudio : fadeOutAudio;
-      const path = await fn(file.path, fadeDur);
-      setEditStatus({ kind: "ok", mode: direction, path });
-      onEdited?.(path);
-    } catch (e) {
-      setEditStatus({ kind: "err", mode: direction, msg: String(e) });
-    } finally {
-      setEditBusy(null);
-    }
-  }
-
-  async function runFadeTail() {
-    if (!file || editBusy) return;
-    setEditBusy("fadetail");
-    setEditStatus(null);
-    try {
-      const path = await fadeTailAudio(file.path, fadeDur, padDur);
-      setEditStatus({ kind: "ok", mode: "fadetail", path });
-      onEdited?.(path);
-    } catch (e) {
-      setEditStatus({ kind: "err", mode: "fadetail", msg: String(e) });
-    } finally {
-      setEditBusy(null);
-    }
-  }
-
-  async function runMatch() {
-    if (!file || editBusy || otherDuration == null) return;
-    setEditBusy("match");
-    setEditStatus(null);
-    try {
-      const path = await matchLengthAudio(file.path, otherDuration);
-      setEditStatus({ kind: "ok", mode: "match", path });
-      onEdited?.(path);
-    } catch (e) {
-      setEditStatus({ kind: "err", mode: "match", msg: String(e) });
     } finally {
       setEditBusy(null);
     }
@@ -670,6 +707,16 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
         const start = activeRegionRef.current?.start ?? 0;
         return Math.max(0, t - start);
       },
+      getLoopRange: () => {
+        const r = activeRegionRef.current;
+        if (!r) return null;
+        return { start: r.start, end: r.end };
+      },
+      getFades: () => ({
+        fadeInSec: fadeInRef.current,
+        fadeOutSec: fadeOutRef.current,
+      }),
+      getMatchOther: () => matchOtherRef.current,
     }),
     [],
   );
@@ -730,6 +777,20 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
       )}
 
       <div className="space-y-1">
+        {/* Envelope strip — sits above the waveform, drag handles set
+            non-destructive fade-in / fade-out. duration target follows
+            the loop region when one is set (so previewed fade length
+            matches what the bounce will produce). */}
+        <EnvelopeStrip
+          duration={
+            regionRange ? regionRange.end - regionRange.start : duration
+          }
+          fadeInSec={fadeInSec}
+          fadeOutSec={fadeOutSec}
+          onFadeInChange={setFadeInSec}
+          onFadeOutChange={setFadeOutSec}
+          disabled={!file || loading}
+        />
         <div className="relative">
           <div ref={containerRef} className={D.waveContainer} />
           {duration > 0 && (
@@ -894,6 +955,75 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           );
         })()}
 
+        {/* Match → other-track length. Non-destructive toggle — when
+            on, the bounce pads/trims this track to the other track's
+            file duration. Only rendered in 2-track mode (otherDuration
+            != null guarantees a second track is loaded). Mirrors the
+            envelope-strip philosophy: live preview is just the toggle
+            state, the actual length change happens at bounce. */}
+        {otherDuration != null && (
+          <button
+            type="button"
+            onClick={() => setMatchOther((p) => !p)}
+            disabled={!file}
+            title={
+              !file
+                ? "Load a sample first"
+                : matchOther
+                  ? `Match → T${otherLabel}: ${otherDuration.toFixed(3)}s — bounce will pad/trim this track to that length. Click to disable.`
+                  : `Match this track's length to Track ${otherLabel} (${otherDuration.toFixed(3)}s) at bounce time — non-destructive`
+            }
+            aria-pressed={matchOther}
+            className={cn(
+              "px-2 py-1 rounded-md text-[10px] font-mono inline-flex items-center gap-1.5",
+              "disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+              matchOther
+                ? "bg-accent/20 text-accent hover:bg-accent/30"
+                : "bg-bg/50 text-muted hover:bg-surface/60",
+            )}
+          >
+            <Equal size={11} />
+            <span>match</span>
+            <span className="text-fg/80">T{otherLabel ?? "?"}</span>
+            {matchOther && (
+              <span className="tabular-nums">
+                {otherDuration.toFixed(2)}s
+              </span>
+            )}
+          </button>
+        )}
+
+        {/* Single-track Bounce — renders this track's loop region (or
+            full file when no region) to a fresh WAV next to source.
+            Only present when App provides `onBounce` (1-track mode);
+            the MasterStrip's Bounce takes over in 2-track mode. */}
+        {onBounce && (
+          <button
+            type="button"
+            onClick={onBounce}
+            disabled={!file || loading || bounceBusy}
+            title={
+              regionRange
+                ? "Bounce — render this track's loop region to a fresh WAV"
+                : "Bounce — render this track to a fresh WAV"
+            }
+            aria-label="Bounce track to WAV"
+            className={cn(
+              "px-2 py-1 rounded-md bg-bg/50 hover:bg-auburn/15",
+              "text-[10px] font-mono inline-flex items-center gap-1.5",
+              "text-auburn disabled:opacity-50 disabled:cursor-not-allowed",
+              "transition-colors",
+            )}
+          >
+            {bounceBusy ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <FileDown size={11} />
+            )}
+            <span>bounce</span>
+          </button>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           <div
             className="inline-flex items-center gap-1.5"
@@ -937,6 +1067,16 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           </button>
         </div>
       </div>
+
+      {/* Bounce status — visible only in single-track mode when a
+          bounce has run or is running. idle render returns null
+          inside BounceStatus, so this whole row collapses to nothing
+          when there's no signal to show. */}
+      {bounceView && bounceView.status !== "idle" && (
+        <div className="-mt-1">
+          <BounceStatus view={bounceView} />
+        </div>
+      )}
 
       {/* Edits row — conditional. Toggle in the header chip. A small
           mt-2 separates it from the transport row above. */}
@@ -1045,8 +1185,13 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             </button>
           </div>
 
-          {/* Fade: shared duration slider + separate fade-in / fade-out
-              apply buttons. Each writes to *-fadein.{ext} / *-fadeout.{ext}. */}
+          {/* Pad: icon-only group with a shared "pad" label + duration
+              slider on the left. Three destructive operations writing
+              new files: pad start (apad before), pad end (apad after),
+              pad here (silence inserted at region.start). Kept icon-
+              only because in the envelope era these are corner-case
+              tools — non-destructive bake-at-bounce is the everyday
+              path. */}
           <div
             className={cn(
               "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
@@ -1055,115 +1200,13 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             title={
               !file
                 ? "Load a sample first"
-                : `Fade duration: ${fadeDur.toFixed(2)}s`
+                : `Pad — silence duration: ${padDur.toFixed(2)}s`
             }
           >
             <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
-              <input
-                type="range"
-                min={0.05}
-                max={10}
-                step={0.05}
-                value={fadeDur}
-                onChange={(e) => setFadeDur(parseFloat(e.target.value))}
-                disabled={!file || editBusy !== null}
-                aria-label="Fade duration in seconds"
-                className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
-              />
-              <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
-                {fadeDur.toFixed(2)}s
+              <span className="text-[10px] uppercase tracking-wide text-muted">
+                pad
               </span>
-            </div>
-            <button
-              onClick={() => runFade("fadein")}
-              disabled={!file || editBusy !== null}
-              title={
-                editBusy === "fadein"
-                  ? "Fading in…"
-                  : !file
-                    ? "Load a sample first"
-                    : `Fade in over ${fadeDur.toFixed(2)}s and save next to source`
-              }
-              className={cn(
-                D.btn,
-                "border-l border-bg/40 text-fg",
-                "hover:bg-surfaceHover disabled:cursor-not-allowed",
-                "flex items-center gap-1.5",
-              )}
-            >
-              {editBusy === "fadein" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <TrendingUp size={14} />
-              )}
-              Fade in
-            </button>
-            <button
-              onClick={() => runFade("fadeout")}
-              disabled={!file || editBusy !== null}
-              title={
-                editBusy === "fadeout"
-                  ? "Fading out…"
-                  : !file
-                    ? "Load a sample first"
-                    : `Fade out over ${fadeDur.toFixed(2)}s and save next to source`
-              }
-              className={cn(
-                D.btn,
-                "border-l border-bg/40 text-fg",
-                "hover:bg-surfaceHover disabled:cursor-not-allowed",
-                "flex items-center gap-1.5",
-              )}
-            >
-              {editBusy === "fadeout" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <TrendingDown size={14} />
-              )}
-              Fade out
-            </button>
-            <button
-              onClick={runFadeTail}
-              disabled={!file || editBusy !== null}
-              title={
-                editBusy === "fadetail"
-                  ? "Fading + tailing…"
-                  : !file
-                    ? "Load a sample first"
-                    : `Fade out over ${fadeDur.toFixed(2)}s, then append ${padDur.toFixed(2)}s of silence — uses the fade slider (here) for the fade and the pad slider for the tail`
-              }
-              className={cn(
-                D.btn,
-                "border-l border-bg/40 text-fg",
-                "hover:bg-surfaceHover disabled:cursor-not-allowed",
-                "flex items-center gap-1.5",
-              )}
-            >
-              {editBusy === "fadetail" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <TrendingDown size={14} />
-              )}
-              Fade+tail
-            </button>
-          </div>
-
-          {/* Pad: shared silence-duration slider + three apply buttons.
-              Pad start / Pad end work on the whole file; Pad here
-              inserts silence at region.start (disabled until a region
-              is set). */}
-          <div
-            className={cn(
-              "inline-flex items-stretch rounded-md overflow-hidden bg-surface",
-              (!file || editBusy !== null) && "opacity-50",
-            )}
-            title={
-              !file
-                ? "Load a sample first"
-                : `Silence duration: ${padDur.toFixed(2)}s`
-            }
-          >
-            <div className={cn("inline-flex items-center gap-1.5", D.btn)}>
               <input
                 type="range"
                 min={0.05}
@@ -1173,7 +1216,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                 onChange={(e) => setPadDur(parseFloat(e.target.value))}
                 disabled={!file || editBusy !== null}
                 aria-label="Pad silence duration in seconds"
-                className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
+                className="w-20 accent-mauve cursor-pointer disabled:cursor-not-allowed"
               />
               <span className="font-mono text-mauve tabular-nums w-10 text-right text-xs">
                 {padDur.toFixed(2)}s
@@ -1187,13 +1230,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                   ? "Padding start…"
                   : !file
                     ? "Load a sample first"
-                    : `Prepend ${padDur.toFixed(2)}s of silence and save next to source`
+                    : `Pad start — prepend ${padDur.toFixed(2)}s of silence (writes new file)`
               }
+              aria-label="Pad start"
               className={cn(
                 D.btn,
                 "border-l border-bg/40 text-fg",
                 "hover:bg-surfaceHover disabled:cursor-not-allowed",
-                "flex items-center gap-1.5",
+                "flex items-center justify-center",
               )}
             >
               {editBusy === "padstart" ? (
@@ -1201,7 +1245,6 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               ) : (
                 <ArrowLeftToLine size={14} />
               )}
-              Pad start
             </button>
             <button
               onClick={() => runPad("padend")}
@@ -1211,13 +1254,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                   ? "Padding end…"
                   : !file
                     ? "Load a sample first"
-                    : `Append ${padDur.toFixed(2)}s of silence and save next to source`
+                    : `Pad end — append ${padDur.toFixed(2)}s of silence (writes new file)`
               }
+              aria-label="Pad end"
               className={cn(
                 D.btn,
                 "border-l border-bg/40 text-fg",
                 "hover:bg-surfaceHover disabled:cursor-not-allowed",
-                "flex items-center gap-1.5",
+                "flex items-center justify-center",
               )}
             >
               {editBusy === "padend" ? (
@@ -1225,7 +1269,6 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               ) : (
                 <ArrowRightToLine size={14} />
               )}
-              Pad end
             </button>
             <button
               onClick={() => runPad("padmid")}
@@ -1237,13 +1280,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                     ? "Load a sample first"
                     : !regionRange
                       ? "Drag a loop region first — silence is inserted at its start"
-                      : `Insert ${padDur.toFixed(2)}s of silence at ${fmtSecs(regionRange.start)} and save next to source`
+                      : `Pad here — insert ${padDur.toFixed(2)}s of silence at ${fmtSecs(regionRange.start)} (writes new file)`
               }
+              aria-label="Pad at region start"
               className={cn(
                 D.btn,
                 "border-l border-bg/40 text-fg",
                 "hover:bg-surfaceHover disabled:cursor-not-allowed",
-                "flex items-center gap-1.5",
+                "flex items-center justify-center",
               )}
             >
               {editBusy === "padmid" ? (
@@ -1251,41 +1295,9 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               ) : (
                 <Split size={14} />
               )}
-              Pad here
             </button>
           </div>
 
-          {/* Match — one-click length-match to the OTHER track. Pads
-              if shorter, trims if longer, no-ops if equal. Disabled
-              when there isn't another track with a known duration. */}
-          <button
-            onClick={runMatch}
-            disabled={
-              !file || editBusy !== null || otherDuration == null
-            }
-            title={
-              editBusy === "match"
-                ? "Matching length…"
-                : !file
-                  ? "Load a sample first"
-                  : otherDuration == null
-                    ? "No other track to match against"
-                    : `Match this track's length to Track ${otherLabel} (${otherDuration.toFixed(3)}s) — pads or trims as needed`
-            }
-            className={cn(
-              D.btn,
-              "rounded-md bg-surface hover:bg-surfaceHover",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              "flex items-center gap-1.5 text-fg",
-            )}
-          >
-            {editBusy === "match" ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Equal size={14} />
-            )}
-            Match T{otherLabel ?? "?"}
-          </button>
         </div>
       )}
 

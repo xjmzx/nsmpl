@@ -2,7 +2,9 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   AudioWaveform,
   Disc3,
+  FileDown,
   KeyRound,
+  Loader2,
   Lock,
   LogOut,
   Pause,
@@ -22,8 +24,11 @@ import { Player, type PlayerHandle } from "./components/Player";
 import { clearIdentity } from "./lib/nostr";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
+import { BounceStatus, type BounceView } from "./components/BounceStatus";
 import type { AudioFile, AudioInfo } from "./lib/tauri";
+import { renderMix } from "./lib/tauri";
 import { loadIdentity, type Identity } from "./lib/nostr";
+import { cn } from "./lib/cn";
 
 const THEME_KEY = "smpl-tool.theme";
 const DENSITY_KEY = "smpl-tool.density";
@@ -282,6 +287,124 @@ export default function App() {
     setMasterTime(0);
   }
 
+  // ---- Bounce / render mix ----------------------------------------
+  // 4-state operation model so the UI can show a discrete signal for
+  // start (idle → running), progress (elapsed ticker), finished
+  // (auto-fading "saved" line), and stopped (persistent error).
+  // Shared state because only one bounce runs at a time and both the
+  // MasterStrip and the per-Track Bounce surface read it.
+  type BounceState =
+    | { status: "idle" }
+    | { status: "running"; startAt: number }
+    | { status: "done"; path: string }
+    | { status: "failed"; error: string };
+  const [bounce, setBounce] = useState<BounceState>({ status: "idle" });
+  const [bounceElapsedMs, setBounceElapsedMs] = useState(0);
+
+  // Tick elapsed time while a bounce is in flight. Sub-second renders
+  // for short loops will barely show motion, but the ticker still
+  // gives an honest "is the process alive" signal for longer mixes.
+  useEffect(() => {
+    if (bounce.status !== "running") {
+      setBounceElapsedMs(0);
+      return;
+    }
+    const startAt = bounce.startAt;
+    setBounceElapsedMs(Date.now() - startAt);
+    const id = window.setInterval(() => {
+      setBounceElapsedMs(Date.now() - startAt);
+    }, 50);
+    return () => window.clearInterval(id);
+  }, [bounce]);
+
+  // Auto-fade the "done" confirmation back to idle after a few seconds.
+  // Errors stay until the next attempt — losing them silently would
+  // hide failures the user needs to fix (missing region, permission
+  // denied, etc.).
+  useEffect(() => {
+    if (bounce.status !== "done") return;
+    const id = window.setTimeout(() => {
+      setBounce({ status: "idle" });
+    }, 4000);
+    return () => window.clearTimeout(id);
+  }, [bounce]);
+
+  function mixInputFromPlayer(idx: TrackIdx, src: string): {
+    src: string;
+    region: [number, number] | null;
+    fadeInSec: number;
+    fadeOutSec: number;
+    targetLenSec: number | null;
+  } {
+    const handle = idx === 0 ? player0Ref.current : player1Ref.current;
+    const r = handle?.getLoopRange();
+    const fades = handle?.getFades() ?? { fadeInSec: 0, fadeOutSec: 0 };
+    const wantMatch = handle?.getMatchOther() ?? false;
+    // Match target = the OTHER track's file duration. Region-aware
+    // matching would need lifted region state — first cut keeps the
+    // semantics simple ("make this track as long as the other's
+    // file"). Caller only invokes mixInputFromPlayer for tracks with
+    // files, but the other track may or may not be loaded.
+    const otherIdx: TrackIdx = idx === 0 ? 1 : 0;
+    const otherLen = audioInfos[otherIdx]?.duration ?? null;
+    const targetLenSec =
+      wantMatch && otherLen != null && otherLen > 0 ? otherLen : null;
+    return {
+      src,
+      region: r ? [r.start, r.end] : null,
+      fadeInSec: fades.fadeInSec,
+      fadeOutSec: fades.fadeOutSec,
+      targetLenSec,
+    };
+  }
+
+  async function bounceMaster() {
+    if (bounce.status === "running") return;
+    const srcA = files[0]?.path;
+    const srcB = files[1]?.path;
+    if (!srcA || !srcB) {
+      setBounce({ status: "failed", error: "master bounce needs both tracks loaded" });
+      return;
+    }
+    setBounce({ status: "running", startAt: Date.now() });
+    try {
+      const path = await renderMix(
+        mixInputFromPlayer(0, srcA),
+        mixInputFromPlayer(1, srcB),
+      );
+      // editCount bump triggers FileBrowser reload so the new mix
+      // appears in Library without a manual refresh.
+      setEditCount((n) => n + 1);
+      setBounce({ status: "done", path });
+    } catch (e) {
+      setBounce({ status: "failed", error: String(e) });
+    }
+  }
+
+  async function bounceTrack(idx: TrackIdx) {
+    if (bounce.status === "running") return;
+    const src = files[idx]?.path;
+    if (!src) {
+      setBounce({ status: "failed", error: `track ${idx + 1} has no file loaded` });
+      return;
+    }
+    setBounce({ status: "running", startAt: Date.now() });
+    try {
+      const path = await renderMix(mixInputFromPlayer(idx, src), null);
+      setEditCount((n) => n + 1);
+      setBounce({ status: "done", path });
+    } catch (e) {
+      setBounce({ status: "failed", error: String(e) });
+    }
+  }
+
+  // Snapshot the bounce state plus the live elapsed counter into a
+  // single value the child surfaces can render uniformly.
+  const bounceView: BounceView =
+    bounce.status === "running"
+      ? { status: "running", elapsedMs: bounceElapsedMs }
+      : bounce;
+
   function loadIntoFocused(f: AudioFile) {
     setFiles((prev) => {
       const next: TrackPair<AudioFile | null> = [...prev] as typeof prev;
@@ -486,6 +609,8 @@ export default function App() {
           onTogglePlay={togglePlayBoth}
           onStop={stopBoth}
           onCue={cueBoth}
+          onBounce={bounceMaster}
+          bounceView={bounceView}
         />
       )}
 
@@ -512,6 +637,10 @@ export default function App() {
             tracksVisible === 2 ? audioInfos[1]?.duration ?? null : null
           }
           otherLabel="2"
+          /* Per-track Bounce surfaces only in single-track mode; in
+             2-track mode the MasterStrip's Bounce mixes both. */
+          onBounce={tracksVisible === 1 ? () => bounceTrack(0) : undefined}
+          bounceView={tracksVisible === 1 ? bounceView : undefined}
         />
         {tracksVisible === 2 && (
           <Player
@@ -620,6 +749,8 @@ function MasterStrip({
   onCue,
   onTogglePlay,
   onStop,
+  onBounce,
+  bounceView,
 }: {
   playing: boolean;
   density: Density;
@@ -627,7 +758,10 @@ function MasterStrip({
   onCue: () => void;
   onTogglePlay: () => void;
   onStop: () => void;
+  onBounce: () => void;
+  bounceView: BounceView;
 }) {
+  const bounceBusy = bounceView.status === "running";
   // Match the per-Track transport chip padding so master + track
   // buttons align horizontally row to row.
   const btn = density === "slim" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2";
@@ -690,6 +824,35 @@ function MasterStrip({
       >
         {fmtMasterTime(time)}
       </span>
+      {/* Master Bounce — renders both tracks (each trimmed to its
+          loop region when set) into a fresh WAV next to Track 1.
+          Auburn tint borrowed from the Publish panel: both are
+          "file-out" actions. Error line below the strip shows the
+          last failure inline — auto-clears on the next attempt. */}
+      <div className="flex flex-col items-end gap-1">
+        <button
+          type="button"
+          onClick={onBounce}
+          disabled={bounceBusy}
+          title="Bounce mix — render both tracks' loop regions to a fresh WAV next to Track 1's source"
+          aria-label="Bounce mix to WAV"
+          className={cn(
+            btn,
+            "rounded-md bg-surface text-auburn hover:bg-auburn/15 transition-colors",
+            "flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed",
+          )}
+        >
+          {bounceBusy ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <FileDown size={14} />
+          )}
+          <span className="text-[10px] font-mono uppercase tracking-wide">
+            bounce
+          </span>
+        </button>
+        <BounceStatus view={bounceView} align="right" />
+      </div>
     </div>
   );
 }

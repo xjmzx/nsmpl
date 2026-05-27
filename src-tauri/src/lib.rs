@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use keyring::Entry;
 use nostr::nips::nip19::{FromBech32, ToBech32};
 use nostr::{Keys, SecretKey};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
 
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -174,71 +174,6 @@ fn probe_duration(src: &str) -> Result<f64, String> {
         .map_err(|e| format!("could not parse duration '{s}': {e}"))
 }
 
-/// Fade the start of the source file in from silence over `duration`
-/// seconds via ffmpeg's `afade` filter. Re-encodes (filter can't
-/// stream-copy a per-sample gain ramp). Output: `{stem}-fadein.{ext}`
-/// next to source.
-#[tauri::command]
-fn fade_in_audio(src: String, duration: f64) -> Result<String, String> {
-    if !duration.is_finite() || duration <= 0.0 {
-        return Err(format!("invalid fade duration: {duration}"));
-    }
-    let src_path = Path::new(&src);
-    if !src_path.is_file() {
-        return Err(format!("not a file: {src}"));
-    }
-    let dst = next_available_output_path(src_path, "fadein")?;
-    let dst_str = dst.to_string_lossy().into_owned();
-
-    let res = run_ffmpeg(&[
-        "-y", "-hide_banner", "-loglevel", "error",
-        "-i", &src,
-        "-af", &format!("afade=t=in:ss=0:d={duration:.6}"),
-        &dst_str,
-    ]);
-    if let Err(e) = res {
-        let _ = fs::remove_file(&dst);
-        return Err(e);
-    }
-    Ok(dst_str)
-}
-
-/// Fade the end of the source file out to silence over `duration`
-/// seconds via ffmpeg's `afade` filter. Requires the file's duration
-/// (ffprobe) to compute the fade start time. Re-encodes. Output:
-/// `{stem}-fadeout.{ext}` next to source.
-#[tauri::command]
-fn fade_out_audio(src: String, duration: f64) -> Result<String, String> {
-    if !duration.is_finite() || duration <= 0.0 {
-        return Err(format!("invalid fade duration: {duration}"));
-    }
-    let src_path = Path::new(&src);
-    if !src_path.is_file() {
-        return Err(format!("not a file: {src}"));
-    }
-    let dur = probe_duration(&src)?;
-    if duration >= dur {
-        return Err(format!(
-            "fade duration {duration:.3}s ≥ file duration {dur:.3}s"
-        ));
-    }
-    let st = dur - duration;
-    let dst = next_available_output_path(src_path, "fadeout")?;
-    let dst_str = dst.to_string_lossy().into_owned();
-
-    let res = run_ffmpeg(&[
-        "-y", "-hide_banner", "-loglevel", "error",
-        "-i", &src,
-        "-af", &format!("afade=t=out:st={st:.6}:d={duration:.6}"),
-        &dst_str,
-    ]);
-    if let Err(e) = res {
-        let _ = fs::remove_file(&dst);
-        return Err(e);
-    }
-    Ok(dst_str)
-}
-
 /// Apply a linear-gain factor to the whole source file via ffmpeg's
 /// `volume` filter. Requires a re-encode (codec can't stream-copy a
 /// per-sample scale), so the output keeps the source's codec via
@@ -269,97 +204,228 @@ fn gain_audio(src: String, gain: f64) -> Result<String, String> {
     Ok(dst_str)
 }
 
-/// Match the source's length to `target_duration` seconds. If the
-/// source is shorter, append silence (apad); if longer, trim from
-/// 0..target_duration via stream-copy. If already matched within
-/// 1 ms, returns an error so the caller can show a friendly message.
-/// Output: `{stem}-match.{ext}` next to source.
-#[tauri::command]
-fn match_length_audio(
-    src: String,
-    target_duration: f64,
-) -> Result<String, String> {
-    if !target_duration.is_finite() || target_duration <= 0.0 {
-        return Err(format!("invalid target duration: {target_duration}"));
+/// Like `next_available_output_path` but forces a `.wav` extension on
+/// the output regardless of the source's container. Used by `render_mix`
+/// where the bounced product is a fresh sampler-grade WAV asset, not a
+/// codec-preserving derivative of either input.
+fn next_available_wav_output_path(src: &Path, tag: &str) -> Result<PathBuf, String> {
+    let dir = src.parent().ok_or("source has no parent directory")?;
+    let stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("source filename is not valid UTF-8")?;
+    let base = dir.join(format!("{stem}-{tag}.wav"));
+    if !base.exists() {
+        return Ok(base);
     }
-    let src_path = Path::new(&src);
-    if !src_path.is_file() {
-        return Err(format!("not a file: {src}"));
+    for n in 2..10_000 {
+        let p = dir.join(format!("{stem}-{tag}-{n}.wav"));
+        if !p.exists() {
+            return Ok(p);
+        }
     }
-    let cur = probe_duration(&src)?;
-    let diff = target_duration - cur;
-    if diff.abs() < 0.001 {
-        return Err(format!(
-            "already matched (diff {:.1} ms)",
-            diff * 1000.0
-        ));
-    }
-    let dst = next_available_output_path(src_path, "match")?;
-    let dst_str = dst.to_string_lossy().into_owned();
-    let res = if diff > 0.0 {
-        // pad end with the missing milliseconds
-        run_ffmpeg(&[
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-i", &src,
-            "-af", &format!("apad=pad_dur={diff:.6}"),
-            &dst_str,
-        ])
-    } else {
-        // trim down to target via stream-copy
-        run_ffmpeg(&[
-            "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", "0",
-            "-to", &format!("{target_duration:.6}"),
-            "-i", &src,
-            "-c", "copy",
-            &dst_str,
-        ])
-    };
-    if let Err(e) = res {
-        let _ = fs::remove_file(&dst);
-        return Err(e);
-    }
-    Ok(dst_str)
+    Err(format!("too many {tag} outputs in this folder"))
 }
 
-/// Fade the end of the source out over `fade_duration` seconds AND
-/// append `tail_duration` seconds of pure silence — single ffmpeg
-/// pass chaining `afade=t=out` + `apad`. Useful for clean loop
-/// tails of exact length. Output: `{stem}-fadetail.{ext}`.
-#[tauri::command]
-fn fade_tail_audio(
+/// Per-input parameters for `render_mix`. Bundled so the frontend
+/// can grow the surface (extra envelope shapes, per-track gain, etc.)
+/// without churning the tauri::command argument list each time.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MixInput {
     src: String,
-    fade_duration: f64,
-    tail_duration: f64,
-) -> Result<String, String> {
-    if !fade_duration.is_finite() || fade_duration <= 0.0 {
-        return Err(format!("invalid fade duration: {fade_duration}"));
+    /// Loop region [start, end] in seconds. None = the whole file.
+    region: Option<(f64, f64)>,
+    /// Linear fade-in length in seconds. 0 = no fade.
+    fade_in_sec: f64,
+    /// Linear fade-out length in seconds. 0 = no fade.
+    fade_out_sec: f64,
+    /// Length-match target in seconds. When Some(t > 0), the chain
+    /// pads (apad) or trims (atrim) the input to exactly `t` seconds
+    /// before any fade filters apply. None = no length match.
+    target_len_sec: Option<f64>,
+}
+
+/// Build a per-input processing chain. Order: length-match first
+/// (apad+atrim so output is exactly target_len whether input was
+/// shorter or longer), then fades. Empty body returns an anull pass
+/// so the caller can drop in a uniform `[a{idx}]` label.
+///
+/// `audible_len` is the input's length as the filter sees it (the
+/// region length when -ss/-to trims at input, else the full file
+/// duration). When `target_len` is Some, fades use that as their
+/// reference for fade-out start; otherwise they use audible_len.
+fn input_processing_chain(
+    idx: usize,
+    audible_len: f64,
+    fade_in: f64,
+    fade_out: f64,
+    target_len: Option<f64>,
+) -> String {
+    let mut parts: Vec<String> = vec![];
+    let effective_len = match target_len {
+        Some(t) if t > 0.0 => {
+            // apad with whole_dur passes through unchanged if the
+            // input already meets target; atrim caps any overshoot.
+            // With both in this order the output is exactly target
+            // length regardless of input length.
+            parts.push(format!("apad=whole_dur={t:.6}"));
+            parts.push(format!("atrim=duration={t:.6}"));
+            t
+        }
+        _ => audible_len,
+    };
+    if fade_in > 0.0 {
+        parts.push(format!("afade=t=in:st=0:d={fade_in:.6}"));
     }
-    if !tail_duration.is_finite() || tail_duration <= 0.0 {
-        return Err(format!("invalid tail duration: {tail_duration}"));
+    if fade_out > 0.0 {
+        let st = (effective_len - fade_out).max(0.0);
+        parts.push(format!("afade=t=out:st={st:.6}:d={fade_out:.6}"));
     }
-    let src_path = Path::new(&src);
-    if !src_path.is_file() {
-        return Err(format!("not a file: {src}"));
+    let body = parts.join(",");
+    if body.is_empty() {
+        format!("[{idx}:a]anull[a{idx}]")
+    } else {
+        format!("[{idx}:a]{body}[a{idx}]")
     }
-    let dur = probe_duration(&src)?;
-    if fade_duration >= dur {
-        return Err(format!(
-            "fade duration {fade_duration:.3}s ≥ file duration {dur:.3}s"
-        ));
+}
+
+/// Bounce a mix of one or two source files to a fresh WAV next to
+/// Track 1's source. Each input gets its own region trim (input-level
+/// `-ss/-to`) and optional fade-in/fade-out envelope (`afade` filter).
+/// Two-input case mixes via ffmpeg `amix=normalize=0` so unity-summed
+/// sources don't get the default 1/N attenuation. Output:
+/// `{src_a stem}-mix.wav` (auto-suffixed on collision), 16-bit PCM.
+/// When no fades are set, takes a simpler filter-free path that
+/// avoids the filter_complex graph entirely.
+#[tauri::command]
+fn render_mix(input_a: MixInput, input_b: Option<MixInput>) -> Result<String, String> {
+    let src_a_path = Path::new(&input_a.src);
+    if !src_a_path.is_file() {
+        return Err(format!("not a file: {}", input_a.src));
     }
-    let st = dur - fade_duration;
-    let dst = next_available_output_path(src_path, "fadetail")?;
+
+    let dst = next_available_wav_output_path(src_a_path, "mix")?;
     let dst_str = dst.to_string_lossy().into_owned();
 
-    let res = run_ffmpeg(&[
-        "-y", "-hide_banner", "-loglevel", "error",
-        "-i", &src,
-        "-af", &format!(
-            "afade=t=out:st={st:.6}:d={fade_duration:.6},apad=pad_dur={tail_duration:.6}"
-        ),
-        &dst_str,
-    ]);
+    // Pre-format region time strings up front — run_ffmpeg takes
+    // &[&str], so the backing Strings must outlive the slice we build.
+    fn region_ss_to(region: Option<(f64, f64)>) -> Option<(String, String)> {
+        match region {
+            Some((s, e))
+                if s.is_finite() && e.is_finite() && s >= 0.0 && e > s =>
+            {
+                Some((format!("{s:.6}"), format!("{e:.6}")))
+            }
+            _ => None,
+        }
+    }
+
+    // Audible length each input contributes (used by fade-out st).
+    fn input_len(input: &MixInput) -> Result<f64, String> {
+        if let Some((s, e)) = input.region {
+            if e > s {
+                return Ok(e - s);
+            }
+        }
+        probe_duration(&input.src)
+    }
+
+    let a_seek = region_ss_to(input_a.region);
+    let any_processing_a = input_a.fade_in_sec > 0.0
+        || input_a.fade_out_sec > 0.0
+        || input_a.target_len_sec.is_some();
+
+    let res = if let Some(input_b) = input_b.as_ref() {
+        let src_b_path = Path::new(&input_b.src);
+        if !src_b_path.is_file() {
+            return Err(format!("not a file: {}", input_b.src));
+        }
+        let b_seek = region_ss_to(input_b.region);
+        let any_processing_b = input_b.fade_in_sec > 0.0
+            || input_b.fade_out_sec > 0.0
+            || input_b.target_len_sec.is_some();
+
+        // Build the filter graph: per-input processing chains feeding
+        // amix. Even when both chains pass through (no envelope or
+        // length-match), we still go through filter_complex so amix
+        // is reachable.
+        let chain_a = if any_processing_a {
+            let len = input_len(&input_a)?;
+            input_processing_chain(
+                0, len,
+                input_a.fade_in_sec, input_a.fade_out_sec,
+                input_a.target_len_sec,
+            )
+        } else {
+            "[0:a]anull[a0]".to_string()
+        };
+        let chain_b = if any_processing_b {
+            let len = input_len(input_b)?;
+            input_processing_chain(
+                1, len,
+                input_b.fade_in_sec, input_b.fade_out_sec,
+                input_b.target_len_sec,
+            )
+        } else {
+            "[1:a]anull[a1]".to_string()
+        };
+        let graph = format!(
+            "{chain_a};{chain_b};[a0][a1]amix=inputs=2:duration=longest:normalize=0[mix]"
+        );
+
+        let mut args: Vec<&str> = vec!["-y", "-hide_banner", "-loglevel", "error"];
+        if let Some((s, e)) = a_seek.as_ref() {
+            args.push("-ss"); args.push(s);
+            args.push("-to"); args.push(e);
+        }
+        args.push("-i"); args.push(&input_a.src);
+        if let Some((s, e)) = b_seek.as_ref() {
+            args.push("-ss"); args.push(s);
+            args.push("-to"); args.push(e);
+        }
+        args.push("-i"); args.push(&input_b.src);
+        args.push("-filter_complex"); args.push(&graph);
+        args.push("-map"); args.push("[mix]");
+        args.push("-c:a"); args.push("pcm_s16le");
+        args.push(&dst_str);
+        run_ffmpeg(&args)
+    } else if any_processing_a {
+        // Single track with envelope or length-match — filter_complex
+        // with the chain mapping out [a0].
+        let len = input_len(&input_a)?;
+        let graph = input_processing_chain(
+            0, len,
+            input_a.fade_in_sec, input_a.fade_out_sec,
+            input_a.target_len_sec,
+        );
+
+        let mut args: Vec<&str> = vec!["-y", "-hide_banner", "-loglevel", "error"];
+        if let Some((s, e)) = a_seek.as_ref() {
+            args.push("-ss"); args.push(s);
+            args.push("-to"); args.push(e);
+        }
+        args.push("-i"); args.push(&input_a.src);
+        args.push("-filter_complex"); args.push(&graph);
+        args.push("-map"); args.push("[a0]");
+        args.push("-c:a"); args.push("pcm_s16le");
+        args.push(&dst_str);
+        run_ffmpeg(&args)
+    } else {
+        // Single track, no fade — plain re-encode to WAV with the
+        // region trim applied at input level. Avoids the filter graph
+        // entirely for the cheapest fast path.
+        let mut args: Vec<&str> = vec!["-y", "-hide_banner", "-loglevel", "error"];
+        if let Some((s, e)) = a_seek.as_ref() {
+            args.push("-ss"); args.push(s);
+            args.push("-to"); args.push(e);
+        }
+        args.push("-i"); args.push(&input_a.src);
+        args.push("-c:a"); args.push("pcm_s16le");
+        args.push(&dst_str);
+        run_ffmpeg(&args)
+    };
+
     if let Err(e) = res {
         let _ = fs::remove_file(&dst);
         return Err(e);
@@ -852,13 +918,10 @@ pub fn run() {
             trim_audio,
             prune_audio,
             gain_audio,
-            fade_in_audio,
-            fade_out_audio,
-            fade_tail_audio,
             pad_start_audio,
             pad_end_audio,
             pad_at_audio,
-            match_length_audio,
+            render_mix,
             detect_bpm,
             get_identity,
             generate_identity,
