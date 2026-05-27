@@ -12,6 +12,32 @@ import { Section } from "./Section";
 import { listAudioFiles, type AudioFile } from "../lib/tauri";
 import { cn } from "../lib/cn";
 
+type Density = "slim" | "wide";
+
+// Density-dependent classNames. Mirrors the Player component's DENSITY
+// map so the Library and the track panels scale together when the user
+// toggles the global density selector.
+// Matches Player's DENSITY map — Library steps section padding +
+// control sizing in lockstep with the per-track Player. Heavier
+// transforms (list container size, row text bumps) didn't read as
+// well in practice; the right-column spacer in App.tsx now keeps the
+// two-column heights consistent so Library doesn't have to do the
+// heavy lifting on its own.
+const DENSITY: Record<Density, {
+  section: string;
+  control: string;
+}> = {
+  slim: {
+    section: "p-3 gap-2",
+    control: "px-2.5 py-1.5 text-xs",
+  },
+  wide: {
+    // Empty section → Section's defaults (p-4 gap-3) apply.
+    section: "",
+    control: "px-3 py-2",
+  },
+};
+
 interface FileBrowserProps {
   onSelect?: (file: AudioFile) => void;
   selected?: AudioFile | null;
@@ -25,6 +51,10 @@ interface FileBrowserProps {
   onListing?: (files: AudioFile[]) => void;
   // Whole-panel collapse — when false, only the title bar renders.
   expanded?: boolean;
+  /** Slim/wide density — matches the per-track Player's density so the
+   *  Library compresses + expands in lockstep with the rest of the work
+   *  area. Defaults to "slim" to stay consistent with the app default. */
+  density?: Density;
   onToggleExpand?: () => void;
 }
 
@@ -86,7 +116,9 @@ export function FileBrowser({
   onListing,
   expanded = true,
   onToggleExpand,
+  density = "slim",
 }: FileBrowserProps) {
+  const D = DENSITY[density];
   const [dir, setDir] = useState(() => localStorage.getItem(DIR_KEY) ?? "");
   const [files, setFiles] = useState<AudioFile[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -182,9 +214,22 @@ export function FileBrowser({
       icon={<FolderOpen size={16} />}
       onTitleClick={onToggleExpand}
       elastic={expanded}
-      className={cn("border-digital/30", !expanded && "min-h-[5rem]")}
+      className={cn(
+        "border-digital/30",
+        !expanded && "min-h-[5rem]",
+        D.section,
+      )}
     >
-      {!expanded ? null : (
+      {!expanded ? (
+        <p
+          className="text-xs text-digital truncate font-mono"
+          title={dir || ""}
+        >
+          {dir
+            ? `${dir} · ${files.length} file${files.length === 1 ? "" : "s"}`
+            : "no directory loaded"}
+        </p>
+      ) : (
         <>
       <div className="flex gap-2">
         <input
@@ -193,17 +238,23 @@ export function FileBrowser({
           onChange={(e) => setDir(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && loadDir(dir)}
           placeholder="/path/to/samples"
-          className="flex-1 px-3 py-2 rounded-md bg-surface text-fg
-                     placeholder:text-muted outline-none border border-transparent
-                     focus:border-accent/50"
+          className={cn(
+            "flex-1 rounded-md bg-surface text-fg",
+            "placeholder:text-muted outline-none border border-transparent",
+            "focus:border-accent/50",
+            D.control,
+          )}
           spellCheck={false}
         />
         <button
           onClick={browse}
           disabled={loading}
-          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
-                     text-fg disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center gap-1.5"
+          className={cn(
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "text-fg disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center gap-1.5",
+            D.control,
+          )}
           title="Browse for folder"
         >
           <FolderOpen size={14} />
@@ -212,9 +263,12 @@ export function FileBrowser({
         <button
           onClick={() => loadDir(dir)}
           disabled={loading || !dir}
-          className="px-3 py-2 rounded-md bg-surface hover:bg-surfaceHover
-                     text-fg disabled:opacity-50 disabled:cursor-not-allowed
-                     flex items-center"
+          className={cn(
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "text-fg disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center",
+            D.control,
+          )}
           title="Reload"
           aria-label="Reload"
         >

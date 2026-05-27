@@ -1,7 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   AudioWaveform,
-  Box,
   Disc3,
   KeyRound,
   Lock,
@@ -20,7 +19,6 @@ import { FileBrowser } from "./components/FileBrowser";
 // surface. Identity for the everyday flow now lives in NostrPanel
 // (logged-out view) and the header KeyRound chip (logged-in forget).
 import { Player, type PlayerHandle } from "./components/Player";
-import { Section } from "./components/Section";
 import { clearIdentity } from "./lib/nostr";
 import { NostrPanel } from "./components/NostrPanel";
 import { InfoPanel } from "./components/InfoPanel";
@@ -34,7 +32,6 @@ const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
 const TRACK_EXPANDED_KEY = "smpl-tool.tracks.expanded";
 const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
 const LIBRARY_EXPANDED_KEY = "smpl-tool.library.expanded";
-const AUX_EXPANDED_KEY = "smpl-tool.aux.expanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
 type Density = "slim" | "wide";
@@ -138,12 +135,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(LIBRARY_EXPANDED_KEY, libraryExpanded ? "1" : "0");
   }, [libraryExpanded]);
-  const [auxExpanded, setAuxExpanded] = useState<boolean>(
-    () => localStorage.getItem(AUX_EXPANDED_KEY) !== "0",
-  );
-  useEffect(() => {
-    localStorage.setItem(AUX_EXPANDED_KEY, auxExpanded ? "1" : "0");
-  }, [auxExpanded]);
   const [trackExpanded, setTrackExpanded] =
     useState<TrackPair<boolean>>(loadTrackExpanded);
   function toggleTrackExpanded(i: TrackIdx) {
@@ -483,103 +474,87 @@ export default function App() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-2 items-stretch">
-        {/* Left column: Library (elastic — grows into spare column
-            height when adjacent panels collapse or when the right
-            column is taller) on top, Sample info below (intrinsic
-            height). Flex column with h-full so it can stretch into
-            the items-stretch row from the outer grid. */}
-        <div className="flex flex-col gap-4 h-full min-h-0">
-          <FileBrowser
-            onSelect={loadIntoFocused}
-            selected={focusedFile}
-            reloadKey={editCount}
-            onListing={handleListing}
-            expanded={libraryExpanded}
-            onToggleExpand={() => setLibraryExpanded((p) => !p)}
-          />
-          <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
-          {/* aux — placeholder panel that sits visually opposite
-              Publish in the right column. min-h only applies when
-              expanded so collapsing shrinks the panel to just its
-              title (like every other collapsible). */}
-          <Section
-            title="aux"
-            icon={<Box size={16} />}
-            onTitleClick={() => setAuxExpanded((p) => !p)}
-            className={
-              auxExpanded
-                ? "border-muted/40 min-h-[20rem]"
-                : "border-muted/40 min-h-[5rem]"
-            }
-          >
-            {auxExpanded && (
-              <p className="text-xs text-muted/60 italic">
-                placeholder — no function wired yet
-              </p>
-            )}
-          </Section>
-        </div>
+      {/* Master strip — Stage 1 of the layout reshape. Lives between the
+          header and the two-col body as a full-width bar so it no longer
+          divides Track 1 from Track 2. Gated on tracksVisible === 2
+          (single-track mode has nothing to master). */}
+      {tracksVisible === 2 && (
+        <MasterStrip
+          playing={anyPlaying}
+          density={density}
+          time={masterTime}
+          onTogglePlay={togglePlayBoth}
+          onStop={stopBoth}
+          onCue={cueBoth}
+        />
+      )}
 
-        {/* Right column: two tracks + publish. FileBrowser clicks load
-            into whichever track is focused (ring-highlighted). `content-start`
-            stops the grid from distributing extra column height across rows,
-            so sections are intrinsic-height and don't grow empty space below
-            their content; any leftover height ends up below the last card. */}
-        <div className="grid grid-cols-1 gap-4 content-start">
+      {/* Tracks fill the full body width — Library moved out to the
+          bottom row's middle slot, so there's no left column to balance
+          anymore. content-start so sections stay intrinsic-height and
+          extra column space falls below the last card rather than
+          distributing across rows. */}
+      <div className="grid grid-cols-1 gap-4 content-start">
+        <Player
+          ref={player0Ref}
+          file={files[0]}
+          label="1"
+          focused={tracksVisible === 2 && focused === 0}
+          onFocus={() => setFocused(0)}
+          onAudioInfo={(i) => setAudioInfoFor(0, i)}
+          onEdited={() => setEditCount((n) => n + 1)}
+          onPlayingChange={(p) => setTrackPlayingFor(0, p)}
+          density={density}
+          editsExpanded={editsExpanded}
+          expanded={trackExpanded[0]}
+          onToggleExpand={() => toggleTrackExpanded(0)}
+          otherDuration={
+            tracksVisible === 2 ? audioInfos[1]?.duration ?? null : null
+          }
+          otherLabel="2"
+        />
+        {tracksVisible === 2 && (
           <Player
-            ref={player0Ref}
-            file={files[0]}
-            label="1"
-            focused={tracksVisible === 2 && focused === 0}
-            onFocus={() => setFocused(0)}
-            onAudioInfo={(i) => setAudioInfoFor(0, i)}
+            ref={player1Ref}
+            file={files[1]}
+            label="2"
+            focused={focused === 1}
+            onFocus={() => setFocused(1)}
+            onAudioInfo={(i) => setAudioInfoFor(1, i)}
             onEdited={() => setEditCount((n) => n + 1)}
-            onPlayingChange={(p) => setTrackPlayingFor(0, p)}
+            onPlayingChange={(p) => setTrackPlayingFor(1, p)}
             density={density}
             editsExpanded={editsExpanded}
-            expanded={trackExpanded[0]}
-            onToggleExpand={() => toggleTrackExpanded(0)}
-            otherDuration={
-              tracksVisible === 2 ? audioInfos[1]?.duration ?? null : null
-            }
-            otherLabel="2"
+            expanded={trackExpanded[1]}
+            onToggleExpand={() => toggleTrackExpanded(1)}
+            otherDuration={audioInfos[0]?.duration ?? null}
+            otherLabel="1"
           />
-          {tracksVisible === 2 && (
-            <>
-              <MasterStrip
-                playing={anyPlaying}
-                density={density}
-                time={masterTime}
-                onTogglePlay={togglePlayBoth}
-                onStop={stopBoth}
-                onCue={cueBoth}
-              />
-              <Player
-                ref={player1Ref}
-                file={files[1]}
-                label="2"
-                focused={focused === 1}
-                onFocus={() => setFocused(1)}
-                onAudioInfo={(i) => setAudioInfoFor(1, i)}
-                onEdited={() => setEditCount((n) => n + 1)}
-                onPlayingChange={(p) => setTrackPlayingFor(1, p)}
-                density={density}
-                editsExpanded={editsExpanded}
-                expanded={trackExpanded[1]}
-                onToggleExpand={() => toggleTrackExpanded(1)}
-                otherDuration={audioInfos[0]?.duration ?? null}
-                otherLabel="1"
-              />
-            </>
-          )}
-          <NostrPanel
-            file={focusedFile}
-            identity={identity}
-            setIdentity={setIdentity}
-            identityLoadError={identityLoadError}
-          />
-        </div>
+        )}
+      </div>
+
+      {/* Bottom-row chip strip — Sample / Library / Publish. Library
+          replaced the aux placeholder and claims the middle slot's wider
+          column (2fr) so the file list breathes; Sample + Publish flank
+          it at 1fr each. items-start keeps a collapsed card from
+          stretching to match a tall sibling. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
+        <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
+        <FileBrowser
+          onSelect={loadIntoFocused}
+          selected={focusedFile}
+          reloadKey={editCount}
+          onListing={handleListing}
+          expanded={libraryExpanded}
+          onToggleExpand={() => setLibraryExpanded((p) => !p)}
+          density={density}
+        />
+        <NostrPanel
+          file={focusedFile}
+          identity={identity}
+          setIdentity={setIdentity}
+          identityLoadError={identityLoadError}
+        />
       </div>
 
       <footer className="rounded-lg bg-panel border border-surface/60 px-4 py-2
