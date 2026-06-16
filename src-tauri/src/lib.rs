@@ -38,6 +38,10 @@ struct AudioFile {
     size: u64,
     /// seconds since UNIX epoch (0 if unavailable).
     modified: u64,
+    /// Path relative to the listed root. For a flat listing this is just the
+    /// filename; for a deep listing it's `artist/release/…/file`, which the
+    /// frontend splits into artist / release columns (blobtree-style).
+    rel: String,
 }
 
 fn is_audio_ext(p: &Path) -> bool {
@@ -71,15 +75,136 @@ fn list_audio_files(dir: String) -> Result<Vec<AudioFile>, String> {
                 .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
+            let name = entry.file_name().to_string_lossy().into_owned();
             Some(AudioFile {
                 path: p.to_string_lossy().into_owned(),
-                name: entry.file_name().to_string_lossy().into_owned(),
+                rel: name.clone(),
+                name,
                 size: meta.len(),
                 modified,
             })
         })
         .collect();
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+/// Cap on a deep listing so a misconfigured root (e.g. `/`) can't hang the UI.
+const DEEP_LIST_CAP: usize = 20_000;
+
+fn collect_audio_deep(dir: &Path, base: &Path, out: &mut Vec<AudioFile>) {
+    if out.len() >= DEEP_LIST_CAP {
+        return;
+    }
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        if out.len() >= DEEP_LIST_CAP {
+            return;
+        }
+        let p = entry.path();
+        if p.is_dir() {
+            collect_audio_deep(&p, base, out);
+        } else if p.is_file() && is_audio_ext(&p) {
+            let Ok(meta) = entry.metadata() else { continue };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let rel = p
+                .strip_prefix(base)
+                .map(|r| r.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| entry.file_name().to_string_lossy().into_owned());
+            out.push(AudioFile {
+                path: p.to_string_lossy().into_owned(),
+                name: entry.file_name().to_string_lossy().into_owned(),
+                size: meta.len(),
+                modified,
+                rel,
+            });
+        }
+    }
+}
+
+/// Recursively list audio files under `dir`, each carrying its `rel` path so
+/// the UI can browse a whole tree (e.g. /data/music_clips at the artist
+/// level), blobtree-style. Capped at DEEP_LIST_CAP.
+#[tauri::command]
+fn list_audio_files_deep(dir: String) -> Result<Vec<AudioFile>, String> {
+    let base = Path::new(&dir);
+    if !base.is_dir() {
+        return Err(format!("not a directory: {dir}"));
+    }
+    let mut out = Vec::new();
+    collect_audio_deep(base, base, &mut out);
+    Ok(out)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderEntry {
+    /// Path relative to the listed root, e.g. "Artist/Release".
+    rel: String,
+    /// Absolute path (so a click can drill straight in via list_audio_files).
+    path: String,
+    /// Count of audio files directly inside this leaf folder (0 ⇒ a gap —
+    /// a release folder where no clips landed).
+    audio_count: usize,
+}
+
+/// Walk to the *leaf* folders under `dir` (those with no child directories —
+/// i.e. where files actually live) and report each with its direct audio
+/// count. Empty / no-audio leaves are included so the UI can flag sampling
+/// gaps. Multi-disc layouts surface their CD subfolders as the leaves.
+fn collect_leaf_folders(dir: &Path, base: &Path, out: &mut Vec<FolderEntry>) {
+    if out.len() >= DEEP_LIST_CAP {
+        return;
+    }
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    let entries: Vec<_> = rd.flatten().collect();
+    let mut subdirs: Vec<PathBuf> =
+        entries.iter().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    if subdirs.is_empty() {
+        // Leaf folder — skip the base itself (only report sub-folders).
+        let Ok(rel) = dir.strip_prefix(base) else { return };
+        if rel.as_os_str().is_empty() {
+            return;
+        }
+        let audio_count = entries
+            .iter()
+            .filter(|e| {
+                let p = e.path();
+                p.is_file() && is_audio_ext(&p)
+            })
+            .count();
+        out.push(FolderEntry {
+            rel: rel.to_string_lossy().into_owned(),
+            path: dir.to_string_lossy().into_owned(),
+            audio_count,
+        });
+    } else {
+        subdirs.sort();
+        for s in subdirs {
+            collect_leaf_folders(&s, base, out);
+        }
+    }
+}
+
+/// List the leaf folders under `dir` with their audio counts — the folder-grain
+/// "has audio / no audio" view used when a parent dir (e.g. /data/music_clips)
+/// holds no direct audio of its own.
+#[tauri::command]
+fn list_leaf_folders(dir: String) -> Result<Vec<FolderEntry>, String> {
+    let base = Path::new(&dir);
+    if !base.is_dir() {
+        return Err(format!("not a directory: {dir}"));
+    }
+    let mut out = Vec::new();
+    collect_leaf_folders(base, base, &mut out);
+    out.sort_by(|a, b| a.rel.to_lowercase().cmp(&b.rel.to_lowercase()));
     Ok(out)
 }
 
@@ -1063,6 +1188,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_audio_files,
+            list_audio_files_deep,
+            list_leaf_folders,
             read_audio_file,
             trim_audio,
             prune_audio,

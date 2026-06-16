@@ -5,6 +5,9 @@ export interface AudioFile {
   name: string;
   size: number;
   modified: number; // unix seconds
+  // Path relative to the listed root. Flat listing → just the filename;
+  // deep listing → "artist/release/…/file" (split for the columns).
+  rel: string;
 }
 
 export interface AudioInfo {
@@ -15,6 +18,26 @@ export interface AudioInfo {
 
 export async function listAudioFiles(dir: string): Promise<AudioFile[]> {
   return invoke<AudioFile[]>("list_audio_files", { dir });
+}
+
+/// Recursive listing under `dir` (each file carries its `rel` path) so the
+/// Library can browse a whole tree at the artist level, blobtree-style.
+export async function listAudioFilesDeep(dir: string): Promise<AudioFile[]> {
+  return invoke<AudioFile[]>("list_audio_files_deep", { dir });
+}
+
+/// A leaf folder (release-grain) with its direct audio count. `audioCount === 0`
+/// marks a sampling gap — a release folder where no clips landed.
+export interface FolderEntry {
+  rel: string; // "Artist/Release" relative to the listed root
+  path: string; // absolute, for drilling in
+  audioCount: number;
+}
+
+/// List leaf folders under `dir` with audio counts — the folder-grain
+/// "has audio / no audio" view for a parent dir (e.g. /data/music_clips).
+export async function listLeafFolders(dir: string): Promise<FolderEntry[]> {
+  return invoke<FolderEntry[]>("list_leaf_folders", { dir });
 }
 
 /// Resolution of a file against the shared suite roots manifest
