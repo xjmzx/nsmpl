@@ -3569,7 +3569,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smpl-tool"
-version = "0.3.0-beta.5"
+version = "0.3.0-beta.6"
 dependencies = [
  "keyring",
  "nostr",
