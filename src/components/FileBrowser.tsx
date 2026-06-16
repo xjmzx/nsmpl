@@ -33,18 +33,18 @@ const DENSITY: Record<Density, {
   section: string;
   control: string;
 }> = {
+  // Lockstep with the Player's vertical diet — each tier one notch slimmer.
   "super-slim": {
+    section: "p-1.5 gap-1",
+    control: "px-2 py-0.5 text-[11px]",
+  },
+  slim: {
     section: "p-2 gap-1.5",
     control: "px-2 py-1 text-[11px]",
   },
-  slim: {
+  wide: {
     section: "p-3 gap-2",
     control: "px-2.5 py-1.5 text-xs",
-  },
-  wide: {
-    // Empty section → Section's defaults (p-4 gap-3) apply.
-    section: "",
-    control: "px-3 py-2",
   },
 };
 

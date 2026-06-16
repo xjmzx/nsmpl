@@ -96,30 +96,28 @@ interface PlayerProps {
 
 // Density-dependent classNames + waveform pixel height. Slim is the
 // installed default; wide reverts to the pre-slim layout.
+// Vertical diet (2026): every tier slimmed one notch — wide now ≈ the old
+// slim, slim ≈ the old super-slim, and super-slim is pared thinner still. The
+// division grid (gridGradient) is height-independent, so it stays the
+// consistent structural reference across all three even at the thinnest wave.
 const DENSITY = {
   "super-slim": {
-    // Waveform is intentionally minimal here — the division grid (gridGradient)
-    // stays the consistent structural reference across all densities, so a
-    // short wave still reads positionally. Tightest paddings/buttons.
+    waveHeight: 18,
+    waveContainer: "rounded-md bg-bg/50 px-2 py-0.5 min-h-[38px]",
+    section: "p-1.5 gap-1",
+    btn: "px-2 py-0.5 text-[11px]",
+  },
+  slim: {
     waveHeight: 28,
     waveContainer: "rounded-md bg-bg/50 px-2 py-1 min-h-[52px]",
     section: "p-2 gap-1.5",
     btn: "px-2 py-1 text-[11px]",
   },
-  slim: {
+  wide: {
     waveHeight: 56,
-    // Container holds the waveform (56px) + Timeline ruler (~14px) +
-    // py-1.5 padding (12px) → ~82px content. min-h gives the box a
-    // stable size before the wave decodes.
     waveContainer: "rounded-md bg-bg/50 px-2 py-1.5 min-h-[90px]",
     section: "p-3 gap-2",
     btn: "px-2.5 py-1.5 text-xs",
-  },
-  wide: {
-    waveHeight: 80,
-    waveContainer: "rounded-md bg-bg/50 px-2 py-2 min-h-[114px]",
-    section: "", // Section defaults (p-4 gap-3) apply.
-    btn: "px-3 py-2",
   },
 } as const;
 
@@ -881,10 +879,10 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               className={cn(
                 "absolute inset-x-2 pointer-events-none",
                 density === "wide"
-                  ? "top-2"
+                  ? "top-1.5"
                   : density === "super-slim"
-                    ? "top-1"
-                    : "top-1.5",
+                    ? "top-0.5"
+                    : "top-1",
               )}
               style={{
                 height: `${D.waveHeight}px`,
