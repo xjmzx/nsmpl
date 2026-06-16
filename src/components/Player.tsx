@@ -66,7 +66,7 @@ interface PlayerProps {
   // UI density. "slim" (default) saves vertical space on small monitors;
   // "wide" matches the original layout with a separate filename row
   // and taller waveform/buttons.
-  density?: "slim" | "wide";
+  density?: "super-slim" | "slim" | "wide";
   // Show the destructive-edits row (Trim/Prune/Gain/Fade). Default
   // collapsed — the deck-first UX keeps transport prominent and edits
   // out of the way.
@@ -97,6 +97,15 @@ interface PlayerProps {
 // Density-dependent classNames + waveform pixel height. Slim is the
 // installed default; wide reverts to the pre-slim layout.
 const DENSITY = {
+  "super-slim": {
+    // Waveform is intentionally minimal here — the division grid (gridGradient)
+    // stays the consistent structural reference across all densities, so a
+    // short wave still reads positionally. Tightest paddings/buttons.
+    waveHeight: 28,
+    waveContainer: "rounded-md bg-bg/50 px-2 py-1 min-h-[52px]",
+    section: "p-2 gap-1.5",
+    btn: "px-2 py-1 text-[11px]",
+  },
   slim: {
     waveHeight: 56,
     // Container holds the waveform (56px) + Timeline ruler (~14px) +
@@ -798,7 +807,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   // separate "now loaded" row. Wide: bare "Track N" title.
   const trackText = `Track${label ? ` ${label}` : ""}`;
   const title =
-    density === "slim" ? (
+    density !== "wide" ? (
       <span className="flex items-baseline gap-2 min-w-0">
         <span className="shrink-0">{trackText}</span>
         {file ? (
@@ -871,7 +880,11 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
               aria-hidden="true"
               className={cn(
                 "absolute inset-x-2 pointer-events-none",
-                density === "slim" ? "top-1.5" : "top-2",
+                density === "wide"
+                  ? "top-2"
+                  : density === "super-slim"
+                    ? "top-1"
+                    : "top-1.5",
               )}
               style={{
                 height: `${D.waveHeight}px`,
