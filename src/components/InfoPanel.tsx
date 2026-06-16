@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import { Section } from "./Section";
-import type { AudioFile, AudioInfo } from "../lib/tauri";
+import {
+  resolveSource,
+  type AudioFile,
+  type AudioInfo,
+  type SourceResolution,
+} from "../lib/tauri";
 import { cn } from "../lib/cn";
 
 const EXPANDED_KEY = "smpl-tool.sample.expanded";
@@ -83,8 +88,34 @@ export function InfoPanel({ file, audioInfo, rootDir }: InfoPanelProps) {
     localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
   }, [expanded]);
 
+  // Manifest-based resolution (named root + clip→source track). Resolved in
+  // Rust against ~/.config/ndisc-suite/roots.json; null while pending or when
+  // the manifest is absent, in which case we fall back to the de-facto root
+  // (the loaded library dir basename) below.
+  const [resolution, setResolution] = useState<SourceResolution | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!file) {
+      setResolution(null);
+      return;
+    }
+    resolveSource(file.path)
+      .then((r) => !cancelled && setResolution(r))
+      .catch(() => !cancelled && setResolution(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [file?.path]);
+
   const mime = file ? mimeFor(file.name) : null;
-  const source = file ? relUnderRoot(rootDir ?? "", file.path) : null;
+  const fallback = file ? relUnderRoot(rootDir ?? "", file.path) : null;
+  // Prefer the manifest's named root; fall back to the loaded-dir basename.
+  const rootName = resolution?.root ?? fallback?.root ?? null;
+  const relPath = resolution?.rel ?? fallback?.rel ?? null;
+  const sourceTrack = resolution?.sourcePath ?? null;
+  const sourceName = sourceTrack
+    ? sourceTrack.split("/").pop() || sourceTrack
+    : null;
 
   const summary = !file
     ? null
@@ -118,15 +149,31 @@ export function InfoPanel({ file, audioInfo, rootDir }: InfoPanelProps) {
       ) : (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
           <Row label="name" value={file.name} mono />
-          {source && (
+          {rootName && relPath != null && (
             <>
               <dt className="text-muted text-[10px] uppercase tracking-wide">
                 source
               </dt>
-              <dd className="font-mono truncate" title={`${source.root}/${source.rel}`}>
-                <span className="text-accent">{source.root}</span>
+              <dd
+                className="font-mono truncate"
+                title={`${rootName}/${relPath}`}
+              >
+                <span className="text-accent">{rootName}</span>
                 <span className="text-muted">/</span>
-                <span className="text-fg/90">{source.rel}</span>
+                <span className="text-fg/90">{relPath}</span>
+              </dd>
+            </>
+          )}
+          {sourceTrack && (
+            <>
+              <dt className="text-muted text-[10px] uppercase tracking-wide">
+                from
+              </dt>
+              <dd className="font-mono truncate" title={sourceTrack}>
+                <span className={resolution?.sourceExists ? "text-ok" : "text-alert"}>
+                  {resolution?.sourceExists ? "⟵ " : "⚠ "}
+                </span>
+                <span className="text-fg/90">{sourceName}</span>
               </dd>
             </>
           )}

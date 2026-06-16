@@ -907,6 +907,155 @@ fn clear_identity() -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Terrain roots — read the shared suite manifest and resolve a clip back to
+// its source track. Phase 1: filesystem-only (no ndisc, no relays).
+//
+// Manifest lives at ~/.config/ndisc-suite/roots.json — per-machine, local,
+// NEVER published (paths differ per machine). See ndisc's
+// schema/terrain-roots-design note for the model. Borrows the label-art
+// manifest's declarative, tolerant-consumer shape: a missing or malformed
+// manifest simply yields "no resolution", never an error.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct RootEntry {
+    #[serde(default)]
+    paths: Vec<String>,
+    /// When set, files under this root mirror artifacts under the named root
+    /// (e.g. music_clips mirrorOf music) — used to resolve a clip's source.
+    #[serde(rename = "mirrorOf", default)]
+    mirror_of: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RootsManifest {
+    #[serde(default)]
+    roots: std::collections::HashMap<String, RootEntry>,
+}
+
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SourceResolution {
+    /// The named root the file lives under (manifest key), if matched.
+    root: Option<String>,
+    /// Path relative to that root.
+    rel: Option<String>,
+    /// For a clip under a `mirrorOf` root: the resolved source track path.
+    source_path: Option<String>,
+    /// Whether that source track actually exists on disk (false ⇒ drift).
+    source_exists: bool,
+}
+
+fn load_roots_manifest() -> Option<RootsManifest> {
+    let home = std::env::var_os("HOME")?;
+    let p = PathBuf::from(home).join(".config/ndisc-suite/roots.json");
+    let raw = fs::read_to_string(p).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Segment-safe relative path of `full` under `root` (None if not under it).
+fn rel_under(root: &str, full: &str) -> Option<String> {
+    let r = root.trim_end_matches('/');
+    if full == r {
+        return Some(String::new());
+    }
+    full.strip_prefix(&format!("{r}/")).map(str::to_string)
+}
+
+/// Strip a clip duration suffix `.<digits>s.<ext>` from the final path
+/// component, returning the relpath ending in the bare source stem. None when
+/// the filename isn't a clip (so non-clip files don't pretend to have a source).
+fn strip_clip_suffix(rel: &str) -> Option<String> {
+    let (dir, file) = match rel.rsplit_once('/') {
+        Some((d, f)) => (Some(d), f),
+        None => (None, rel),
+    };
+    let (before_ext, _ext) = file.rsplit_once('.')?; // "01 }.10s" , "flac"
+    let (stem, durs) = before_ext.rsplit_once('.')?; // "01 }" , "10s"
+    let is_dur = durs.len() > 1
+        && durs.ends_with('s')
+        && durs[..durs.len() - 1].chars().all(|c| c.is_ascii_digit());
+    if !is_dur {
+        return None;
+    }
+    Some(match dir {
+        Some(d) => format!("{d}/{stem}"),
+        None => stem.to_string(),
+    })
+}
+
+/// In the directory implied by `<root>/<dir(stem_rel)>`, find an audio file
+/// whose stem equals `basename(stem_rel)` (source extension may differ from
+/// the clip's). Returns its absolute path.
+fn find_by_stem(root: &str, stem_rel: &str) -> Option<String> {
+    let full = format!("{}/{stem_rel}", root.trim_end_matches('/'));
+    let p = Path::new(&full);
+    let dir = p.parent()?;
+    let want = p.file_name()?.to_str()?;
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let ep = entry.path();
+        if ep.is_file()
+            && is_audio_ext(&ep)
+            && ep.file_stem().and_then(|s| s.to_str()) == Some(want)
+        {
+            return Some(ep.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn resolve_source(path: String) -> SourceResolution {
+    let mut out = SourceResolution::default();
+    let Some(manifest) = load_roots_manifest() else {
+        return out;
+    };
+
+    // Longest matching root path wins (segment-safe), so nested roots resolve
+    // to the deepest one.
+    let mut best: Option<(&String, &RootEntry, usize, String)> = None;
+    for (name, entry) in &manifest.roots {
+        for rp in &entry.paths {
+            if let Some(rel) = rel_under(rp, &path) {
+                let len = rp.trim_end_matches('/').len();
+                if best.as_ref().map_or(true, |(_, _, blen, _)| len > *blen) {
+                    best = Some((name, entry, len, rel));
+                }
+            }
+        }
+    }
+    let Some((name, entry, _, rel)) = best else {
+        return out;
+    };
+    out.root = Some(name.clone());
+    out.rel = Some(rel.clone());
+
+    // If this root mirrors another, resolve the clip back to its source track.
+    if let Some(mirror_name) = &entry.mirror_of {
+        if let (Some(mirror), Some(stem_rel)) =
+            (manifest.roots.get(mirror_name), strip_clip_suffix(&rel))
+        {
+            for mp in &mirror.paths {
+                if let Some(found) = find_by_stem(mp, &stem_rel) {
+                    out.source_path = Some(found);
+                    out.source_exists = true;
+                    break;
+                }
+            }
+            // Surface the expected path even when missing, so the UI can flag
+            // drift (renamed/removed source) rather than show nothing.
+            if out.source_path.is_none() {
+                if let Some(mp) = mirror.paths.first() {
+                    out.source_path =
+                        Some(format!("{}/{stem_rel}", mp.trim_end_matches('/')));
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -926,7 +1075,8 @@ pub fn run() {
             get_identity,
             generate_identity,
             import_identity,
-            clear_identity
+            clear_identity,
+            resolve_source
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

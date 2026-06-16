@@ -17,6 +17,22 @@ export async function listAudioFiles(dir: string): Promise<AudioFile[]> {
   return invoke<AudioFile[]>("list_audio_files", { dir });
 }
 
+/// Resolution of a file against the shared suite roots manifest
+/// (~/.config/ndisc-suite/roots.json). `root`/`rel` locate the file under a
+/// named root; for a clip under a `mirrorOf` root, `sourcePath` is the
+/// resolved source track (`sourceExists=false` ⇒ drift — source renamed/gone).
+/// All fields null/false when the manifest is absent or the file is unmatched.
+export interface SourceResolution {
+  root: string | null;
+  rel: string | null;
+  sourcePath: string | null;
+  sourceExists: boolean;
+}
+
+export async function resolveSource(path: string): Promise<SourceResolution> {
+  return invoke<SourceResolution>("resolve_source", { path });
+}
+
 export async function readAudioFile(path: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("read_audio_file", { path });
 }
