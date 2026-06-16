@@ -563,28 +563,26 @@ export default function App() {
           )}
         </div>
 
-        {/* Publish spec — sits in the centre column of the 3-col
-            grid (1fr_auto_1fr), so it's true-centred against the
-            full header width regardless of the side widths. */}
-        <div
-          className="hidden md:flex items-center min-w-0
-                     text-xs leading-snug whitespace-nowrap overflow-hidden"
-        >
-          <span className="text-mauve font-mono mr-2 shrink-0">Nostr</span>
-          <span className="font-mono text-accent shrink-0">kind 1063</span>
-          <span className="text-fg/70 shrink-0">
-            {" "}
-            (NIP94 file metadata){" "}
-          </span>
-          <span className="text-fg/70 shrink-0">tags: </span>
-          <span className="font-mono text-accent shrink-0">
-            url, m, x, size, title
-          </span>
-          <span className="text-fg/70 shrink-0"> auth: </span>
-          <span className="font-mono text-accent shrink-0">NIP-98</span>
-          <span className="text-fg/70 shrink-0"> (27235). Upload: </span>
-          <span className="font-mono text-accent shrink-0">NIP-96</span>
-        </div>
+        {/* Master Control — moved up into the header's centre column (where
+            the publish-spec notes used to sit). Transport · counter · mute ·
+            bounce read as the top bar's focal point. 2-track only; single
+            track has nothing to master, so the centre stays empty. */}
+        {tracksVisible === 2 ? (
+          <MasterStrip
+            playing={anyPlaying}
+            time={masterTime}
+            onTogglePlay={togglePlayBoth}
+            onStop={stopBoth}
+            onCue={cueBoth}
+            onBounce={bounceMaster}
+            bounceView={bounceView}
+            onReset={resetMaster}
+            muted={masterMuted}
+            onToggleMute={() => setMasterMuted((p) => !p)}
+          />
+        ) : (
+          <span aria-hidden="true" />
+        )}
 
         {/* View + tracks selectors — right column of the header grid.
             justify-self-end pins them to the right edge of their
@@ -646,26 +644,6 @@ export default function App() {
           )}
         </div>
       </header>
-
-      {/* Master strip — Stage 1 of the layout reshape. Lives between the
-          header and the two-col body as a full-width bar so it no longer
-          divides Track 1 from Track 2. Gated on tracksVisible === 2
-          (single-track mode has nothing to master). */}
-      {tracksVisible === 2 && (
-        <MasterStrip
-          playing={anyPlaying}
-          density={density}
-          time={masterTime}
-          onTogglePlay={togglePlayBoth}
-          onStop={stopBoth}
-          onCue={cueBoth}
-          onBounce={bounceMaster}
-          bounceView={bounceView}
-          onReset={resetMaster}
-          muted={masterMuted}
-          onToggleMute={() => setMasterMuted((p) => !p)}
-        />
-      )}
 
       {/* Tracks fill the full body width — Library moved out to the
           bottom row's middle slot, so there's no left column to balance
@@ -792,9 +770,14 @@ export default function App() {
           )}
         </span>
 
-        {/* Right column placeholder — keeps the 3-col grid balanced
-            without inserting visible filler. */}
-        <span aria-hidden="true" />
+        {/* Nostr event-kinds vestige — relocated from the old header spec
+            block. A condensed reminder of what smpl publishes, parked in the
+            footer's right column. */}
+        <span className="hidden md:inline-flex items-center gap-2 justify-self-end min-w-0 font-mono text-[10px] text-muted/70">
+          <span className="text-mauve">Nostr</span>
+          <span className="text-accent shrink-0">kind 1063</span>
+          <span className="truncate">NIP-94 · 96 · 98</span>
+        </span>
 
       </footer>
     </div>
@@ -810,7 +793,6 @@ function fmtMasterTime(t: number): string {
 
 function MasterStrip({
   playing,
-  density,
   time,
   onCue,
   onTogglePlay,
@@ -822,7 +804,6 @@ function MasterStrip({
   onToggleMute,
 }: {
   playing: boolean;
-  density: Density;
   time: number;
   onCue: () => void;
   onTogglePlay: () => void;
@@ -834,47 +815,22 @@ function MasterStrip({
   onToggleMute: () => void;
 }) {
   const bounceBusy = bounceView.status === "running";
-  // Density still tweaks slightly — wide gets a hair more padding —
-  // but the master buttons now have their own intrinsic sizes
-  // regardless of the per-Track density. Master is the deck's primary
-  // control surface, so the transport row earns prominence over
-  // matching the per-Track button geometry.
-  const cardPad =
-    density === "wide"
-      ? "px-5 py-3.5"
-      : density === "super-slim"
-        ? "px-3 py-2"
-        : "px-4 py-3";
-  // Three button size tiers:
-  //  - transport: 48px square, big icons — primary playback
-  //  - utility: 40px square, smaller icons — recovery / audio toggle
-  //  - bounce: 48px tall, label + icon — output action
+  // Header-scaled controls: the master now lives inline in the top bar's
+  // centre column (not a standalone card), so buttons + counter are sized to
+  // a header row. Transport > utility > bounce, same tonal language as before.
   const transportBtn =
-    "h-12 w-12 rounded-md bg-surface text-mauve hover:bg-mauve/15 " +
+    "h-9 w-9 rounded-md bg-surface text-mauve hover:bg-mauve/15 " +
     "transition-colors flex items-center justify-center shrink-0";
   const utilityBtn =
-    "h-10 w-10 rounded-md transition-colors " +
+    "h-8 w-8 rounded-md transition-colors " +
     "flex items-center justify-center shrink-0";
   const bounceBtn =
-    "h-12 px-4 rounded-md bg-surface text-auburn hover:bg-auburn/15 " +
-    "transition-colors flex items-center gap-2 shrink-0 " +
+    "h-9 px-3 rounded-md bg-surface text-auburn hover:bg-auburn/15 " +
+    "transition-colors flex items-center gap-1.5 shrink-0 " +
     "disabled:opacity-50 disabled:cursor-not-allowed";
   return (
-    <div
-      className={cn(
-        "rounded-xl bg-panel border border-ok/30 shadow-md",
-        cardPad,
-        // Constrain width so the card stops being a stretched-out
-        // billboard. mx-auto centers it; breathing room is reserved
-        // for future master-level features (master fader, FX bus,
-        // tempo readout, etc.).
-        "max-w-[64rem] mx-auto",
-        "flex items-center gap-4",
-      )}
-    >
-      {/* LEFT — Transport cluster. Big square buttons (48px) reading
-          left-to-right Cue → Play → Stop, matching deck conventions.
-          Tightly grouped so they read as a single transport unit. */}
+    <div className="flex items-center justify-center gap-2">
+      {/* Transport — Cue → Play/Pause → Stop, grouped as one unit. */}
       <div className="inline-flex gap-1">
         <button
           type="button"
@@ -883,7 +839,7 @@ function MasterStrip({
           aria-label="Cue both tracks"
           className={transportBtn}
         >
-          <SkipBack size={22} fill="currentColor" />
+          <SkipBack size={16} fill="currentColor" />
         </button>
         <button
           type="button"
@@ -894,9 +850,9 @@ function MasterStrip({
           className={transportBtn}
         >
           {playing ? (
-            <Pause size={22} fill="currentColor" />
+            <Pause size={16} fill="currentColor" />
           ) : (
-            <Play size={22} fill="currentColor" />
+            <Play size={16} fill="currentColor" />
           )}
         </button>
         <button
@@ -906,13 +862,11 @@ function MasterStrip({
           aria-label="Stop both tracks"
           className={transportBtn}
         >
-          <Square size={22} fill="currentColor" />
+          <Square size={16} fill="currentColor" />
         </button>
       </div>
 
-      {/* LEFT-MID — Recovery utility. Reset is a "danger" action so
-          it sits apart from transport, tinted alert-red, slightly
-          smaller (40px) to read as secondary. */}
+      {/* Recovery — Reset (danger-tinted, set apart from transport). */}
       <button
         type="button"
         onClick={() => {
@@ -927,29 +881,20 @@ function MasterStrip({
         }}
         title="Reset both audio engines — safety net if a track stops responding to play/stop"
         aria-label="Reset both tracks"
-        className={cn(
-          utilityBtn,
-          "bg-surface text-alert hover:bg-alert/15",
-        )}
+        className={cn(utilityBtn, "bg-surface text-alert hover:bg-alert/15")}
       >
-        <RotateCcw size={18} />
+        <RotateCcw size={15} />
       </button>
 
-      {/* CENTER — Master loop counter. flex-1 makes it absorb the
-          slack between left and right clusters, centering the
-          readout. Larger type than per-Track (4xl vs 3xl) so the
-          counter dominates as the deck's focal point. */}
+      {/* Master loop counter — header-scaled (xl), inline. */}
       <span
-        className="flex-1 text-center font-mono font-bold text-4xl text-ok tabular-nums tracking-tight"
+        className="px-1 text-center font-mono font-bold text-xl text-ok tabular-nums tracking-tight"
         title="Master loop position — playhead time within the current loop; resets when the loop wraps and on Cue."
       >
         {fmtMasterTime(time)}
       </span>
 
-      {/* RIGHT-MID — Master mute. Same 40px utility size as Reset;
-          tinted alert-red only when active to signal the silent
-          state. Per-track mute toggles are independent — this is
-          the global OR. */}
+      {/* Master mute — global OR over the per-track mutes. */}
       <button
         type="button"
         onClick={onToggleMute}
@@ -967,14 +912,12 @@ function MasterStrip({
             : "bg-surface text-mauve hover:bg-mauve/15",
         )}
       >
-        {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
       </button>
 
-      {/* RIGHT — Output. Bounce is the deck's "render to disk"
-          action; status line (running ticker / done filename /
-          failure error) renders directly below the button so the
-          whole output cluster reads as one visual block. */}
-      <div className="flex flex-col items-end gap-1">
+      {/* Output — Bounce + its single-line status inline to the right so the
+          whole cluster stays on the header's one row. */}
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onBounce}
@@ -984,15 +927,15 @@ function MasterStrip({
           className={bounceBtn}
         >
           {bounceBusy ? (
-            <Loader2 size={18} className="animate-spin" />
+            <Loader2 size={16} className="animate-spin" />
           ) : (
-            <FileDown size={18} />
+            <FileDown size={16} />
           )}
-          <span className="text-xs font-mono uppercase tracking-wide">
+          <span className="text-[11px] font-mono uppercase tracking-wide">
             bounce
           </span>
         </button>
-        <BounceStatus view={bounceView} align="right" />
+        <BounceStatus view={bounceView} align="left" />
       </div>
     </div>
   );
