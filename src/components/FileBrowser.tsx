@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  FolderInput,
   FolderOpen,
   RefreshCw,
   Search,
@@ -9,10 +10,15 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
-import { listAudioFiles, type AudioFile } from "../lib/tauri";
+import {
+  listAudioFiles,
+  listLeafFolders,
+  type AudioFile,
+  type FolderEntry,
+} from "../lib/tauri";
 import { cn } from "../lib/cn";
 
-type Density = "slim" | "wide";
+type Density = "super-slim" | "slim" | "wide";
 
 // Density-dependent classNames. Mirrors the Player component's DENSITY
 // map so the Library and the track panels scale together when the user
@@ -27,6 +33,10 @@ const DENSITY: Record<Density, {
   section: string;
   control: string;
 }> = {
+  "super-slim": {
+    section: "p-2 gap-1.5",
+    control: "px-2 py-1 text-[11px]",
+  },
   slim: {
     section: "p-3 gap-2",
     control: "px-2.5 py-1.5 text-xs",
@@ -111,6 +121,18 @@ function fmtModified(unixSec: number): string {
 // Three-column grid shared by header + rows so the headers line up with
 // their values.
 const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem] gap-3 items-center";
+// Folder-mode grid: dot | artist | release | count.
+const FOLDER_GRID_CLS =
+  "grid grid-cols-[0.75rem_1fr_1fr_2.5rem] gap-2 items-center";
+
+// Split a folder rel ("Artist/Release[/Disc]") into artist + release columns.
+function splitRel(rel: string): { artist: string; release: string } {
+  const parts = rel.split("/");
+  return {
+    artist: parts[0] || rel,
+    release: parts.slice(1).join("/"),
+  };
+}
 
 export function FileBrowser({
   onSelect,
@@ -125,6 +147,12 @@ export function FileBrowser({
   const D = DENSITY[density];
   const [dir, setDir] = useState(() => localStorage.getItem(DIR_KEY) ?? "");
   const [files, setFiles] = useState<AudioFile[]>([]);
+  // Folder mode: the loaded dir held no direct audio, so we list its leaf
+  // folders (release-grain, artist/release columns + has-audio dot) instead of
+  // a file list. Clicking a folder drills in to its files (flat mode).
+  const [folderMode, setFolderMode] = useState(false);
+  const [folders, setFolders] = useState<FolderEntry[]>([]);
+  const [audioFilter, setAudioFilter] = useState<"all" | "has" | "none">("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<Sort>(loadSort);
@@ -142,8 +170,17 @@ export function FileBrowser({
     setLoading(true);
     setError(null);
     try {
+      // Flat listing first; if the directory has no direct audio (e.g. the
+      // user opened /data/music_clips at the artist level), fall back to its
+      // leaf folders so the parent shows releases, not a flat clip dump.
       const items = await listAudioFiles(path);
+      let folderList: FolderEntry[] = [];
+      if (items.length === 0) {
+        folderList = await listLeafFolders(path);
+      }
       setFiles(items);
+      setFolders(folderList);
+      setFolderMode(folderList.length > 0);
       setDir(path);
       localStorage.setItem(DIR_KEY, path);
       onListingRef.current?.(items);
@@ -151,6 +188,8 @@ export function FileBrowser({
     } catch (e) {
       setError(String(e));
       setFiles([]);
+      setFolders([]);
+      setFolderMode(false);
     } finally {
       setLoading(false);
     }
@@ -212,8 +251,38 @@ export function FileBrowser({
     return arr;
   }, [files, sort, query]);
 
+  // Folder-mode rows: filtered by the search box (on rel) and the has/no-audio
+  // toggle. Already sorted by rel from the backend.
+  const shownFolders = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return folders.filter((f) => {
+      if (q && !f.rel.toLowerCase().includes(q)) return false;
+      if (audioFilter === "has" && f.audioCount === 0) return false;
+      if (audioFilter === "none" && f.audioCount > 0) return false;
+      return true;
+    });
+  }, [folders, query, audioFilter]);
+
+  // Tally for the filter chips (over the search-filtered set).
+  const folderTotals = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const base = q
+      ? folders.filter((f) => f.rel.toLowerCase().includes(q))
+      : folders;
+    const has = base.filter((f) => f.audioCount > 0).length;
+    return { all: base.length, has, none: base.length - has };
+  }, [folders, query]);
+
+  // Navigate up one directory level (used to climb back out of a drilled-in
+  // release folder to the release/audit view).
+  function goUp() {
+    const parent = dir.replace(/\/+$/, "").replace(/\/[^/]*$/, "");
+    if (parent) loadDir(parent);
+  }
+
   const filterActive = query.trim().length > 0;
-  const noMatches = filterActive && sortedFiles.length === 0;
+  const noMatches =
+    filterActive && !folderMode && sortedFiles.length === 0;
 
   return (
     <Section
@@ -223,7 +292,7 @@ export function FileBrowser({
       elastic={expanded}
       className={cn(
         "border-digital/30",
-        !expanded && "min-h-[5rem]",
+        !expanded && "min-h-[5rem] self-start",
         D.section,
       )}
     >
@@ -233,7 +302,9 @@ export function FileBrowser({
           title={dir || ""}
         >
           {dir
-            ? `${dir} · ${files.length} file${files.length === 1 ? "" : "s"}`
+            ? folderMode
+              ? `${dir} · ${folders.length} release${folders.length === 1 ? "" : "s"}`
+              : `${dir} · ${files.length} file${files.length === 1 ? "" : "s"}`
             : "no directory loaded"}
         </p>
       ) : (
@@ -253,6 +324,20 @@ export function FileBrowser({
           )}
           spellCheck={false}
         />
+        <button
+          onClick={goUp}
+          disabled={loading || !dir}
+          className={cn(
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "text-fg disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center",
+            D.control,
+          )}
+          title="Up one folder"
+          aria-label="Up one folder"
+        >
+          <FolderInput size={14} className="-scale-y-100" />
+        </button>
         <button
           onClick={browse}
           disabled={loading}
@@ -297,10 +382,16 @@ export function FileBrowser({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={files.length > 0 ? `Filter ${files.length} files…` : "Filter files…"}
-          aria-label="Filter files by name"
+          placeholder={
+            folderMode
+              ? `Filter ${folders.length} releases…`
+              : files.length > 0
+                ? `Filter ${files.length} files…`
+                : "Filter files…"
+          }
+          aria-label="Filter library"
           spellCheck={false}
-          disabled={files.length === 0}
+          disabled={files.length === 0 && folders.length === 0}
           className="w-full pl-7 pr-7 py-1.5 rounded-md bg-surface text-fg text-xs
                      placeholder:text-muted outline-none border border-transparent
                      focus:border-accent/50 disabled:opacity-50"
@@ -317,6 +408,46 @@ export function FileBrowser({
         )}
       </div>
 
+      {/* Folder-mode has/no-audio filter — round themed dot for releases that
+          contain audio, hollow for sampling gaps. */}
+      {folderMode && (
+        <div className="mt-2 flex items-center gap-1 text-[10px]">
+          {(
+            [
+              ["all", "all", folderTotals.all],
+              ["has", "has audio", folderTotals.has],
+              ["none", "no audio", folderTotals.none],
+            ] as const
+          ).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setAudioFilter(key)}
+              aria-pressed={audioFilter === key}
+              className={cn(
+                "flex items-center gap-1 px-2 py-0.5 rounded-md transition-colors tabular-nums",
+                audioFilter === key
+                  ? "bg-surface text-fg"
+                  : "text-muted hover:text-fg hover:bg-surface/50",
+              )}
+            >
+              {key !== "all" && (
+                <span
+                  className={cn(
+                    "w-2 h-2 rounded-full",
+                    key === "has"
+                      ? "bg-digital"
+                      : "border border-muted/70",
+                  )}
+                />
+              )}
+              {label}
+              <span className="text-muted/70">{count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* flex-1 lets this block fill the section's elastic children
           area when the column has spare height. min-h floor keeps it
           from collapsing below a few rows; max-h caps it at ~10
@@ -325,59 +456,116 @@ export function FileBrowser({
       <div className="mt-1 rounded-md bg-bg/50 overflow-hidden flex flex-col flex-1 min-h-[10rem] max-h-[20rem]">
         <div
           className={cn(
-            GRID_CLS,
+            folderMode ? FOLDER_GRID_CLS : GRID_CLS,
             "px-3 py-1.5 text-[10px] uppercase tracking-wide text-muted",
             "border-b border-surface/60",
           )}
         >
-          <SortHeader label="name" k="name" sort={sort} onToggle={toggleSort} />
-          <SortHeader
-            label="size"
-            k="size"
-            sort={sort}
-            onToggle={toggleSort}
-            align="right"
-          />
-          <SortHeader
-            label="modified"
-            k="modified"
-            sort={sort}
-            onToggle={toggleSort}
-            align="right"
-          />
+          {folderMode ? (
+            <>
+              <span aria-hidden="true" />
+              <span>artist</span>
+              <span>release</span>
+              <span className="text-right">♪</span>
+            </>
+          ) : (
+            <>
+              <SortHeader
+                label="name"
+                k="name"
+                sort={sort}
+                onToggle={toggleSort}
+              />
+              <SortHeader
+                label="size"
+                k="size"
+                sort={sort}
+                onToggle={toggleSort}
+                align="right"
+              />
+              <SortHeader
+                label="modified"
+                k="modified"
+                sort={sort}
+                onToggle={toggleSort}
+                align="right"
+              />
+            </>
+          )}
         </div>
 
         <ul className="flex-1 min-h-0 overflow-auto divide-y divide-surface/60">
-          {sortedFiles.length === 0 && !loading && !error && (
-            <li className="px-3 py-3 text-muted text-xs">
-              {files.length === 0
-                ? "No directory loaded. Click Browse, or type a path and press Enter."
-                : noMatches
-                  ? `No files match “${query.trim()}”.`
-                  : "No files."}
-            </li>
-          )}
-          {sortedFiles.map((f) => (
-            <li
-              key={f.path}
-              onClick={() => onSelect?.(f)}
-              className={cn(
-                GRID_CLS,
-                "px-3 py-2 text-xs font-mono cursor-pointer",
-                "hover:bg-surface/40",
-                selected?.path === f.path && "bg-surface/70 text-accent",
+          {folderMode ? (
+            <>
+              {shownFolders.length === 0 && !loading && !error && (
+                <li className="px-3 py-3 text-muted text-xs">
+                  No releases match.
+                </li>
               )}
-              title={f.path}
-            >
-              <span className="truncate">{f.name}</span>
-              <span className="text-muted text-right shrink-0">
-                {fmtSize(f.size)}
-              </span>
-              <span className="text-muted text-right shrink-0">
-                {fmtModified(f.modified)}
-              </span>
-            </li>
-          ))}
+              {shownFolders.map((fld) => {
+                const { artist, release } = splitRel(fld.rel);
+                const hasAudio = fld.audioCount > 0;
+                return (
+                  <li
+                    key={fld.path}
+                    onClick={() => loadDir(fld.path)}
+                    className={cn(
+                      FOLDER_GRID_CLS,
+                      "px-3 py-2 text-xs font-mono cursor-pointer hover:bg-surface/40",
+                      !hasAudio && "text-muted",
+                    )}
+                    title={`${fld.path} · ${fld.audioCount} audio file${fld.audioCount === 1 ? "" : "s"}`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "w-2 h-2 rounded-full",
+                        hasAudio ? "bg-digital" : "border border-muted/70",
+                      )}
+                    />
+                    <span className="truncate text-muted">{artist}</span>
+                    <span className="truncate">{release}</span>
+                    <span className="text-muted text-right shrink-0 tabular-nums">
+                      {fld.audioCount}
+                    </span>
+                  </li>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {sortedFiles.length === 0 && !loading && !error && (
+                <li className="px-3 py-3 text-muted text-xs">
+                  {files.length === 0
+                    ? "No directory loaded. Click Browse, or type a path and press Enter."
+                    : noMatches
+                      ? `No files match “${query.trim()}”.`
+                      : "No files."}
+                </li>
+              )}
+              {sortedFiles.map((f) => (
+                <li
+                  key={f.path}
+                  onClick={() => onSelect?.(f)}
+                  className={cn(
+                    GRID_CLS,
+                    "px-3 py-2 text-xs font-mono cursor-pointer",
+                    "hover:bg-surface/40",
+                    selected?.path === f.path && "bg-surface/70 text-accent",
+                  )}
+                  title={f.path}
+                >
+                  <span className="truncate">{f.name}</span>
+                  <span className="text-muted text-right shrink-0">
+                    {fmtSize(f.size)}
+                  </span>
+                  <span className="text-muted text-right shrink-0">
+                    {fmtModified(f.modified)}
+                  </span>
+                </li>
+              ))}
+            </>
+          )}
         </ul>
       </div>
         </>

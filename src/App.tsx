@@ -42,11 +42,12 @@ const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
 const LIBRARY_EXPANDED_KEY = "smpl-tool.library.expanded";
 const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
 type Theme = "fizx" | "upleb";
-type Density = "slim" | "wide";
+type Density = "super-slim" | "slim" | "wide";
 type TracksVisible = 1 | 2;
 
 function loadDensity(): Density {
-  return localStorage.getItem(DENSITY_KEY) === "wide" ? "wide" : "slim";
+  const v = localStorage.getItem(DENSITY_KEY);
+  return v === "wide" || v === "super-slim" ? v : "slim";
 }
 function loadTracksVisible(): TracksVisible {
   return localStorage.getItem(TRACKS_VISIBLE_KEY) === "1" ? 1 : 2;
@@ -144,6 +145,30 @@ export default function App() {
   // Sample panel can show a selected file's path relative to it — the de-facto
   // "root" until the suite roots manifest lands (see ndisc terrain-roots note).
   const [libDir, setLibDir] = useState("");
+  // Horizontal collapse of the two flanks — when a flank is closed it renders
+  // as a thin strip and the grid hands its width to the Library. Persisted.
+  const [sampleOpen, setSampleOpen] = useState(
+    () => localStorage.getItem("smpl-tool.sample.open") !== "0",
+  );
+  const [publishOpen, setPublishOpen] = useState(
+    () => localStorage.getItem("smpl-tool.publish.open") !== "0",
+  );
+  useEffect(() => {
+    localStorage.setItem("smpl-tool.sample.open", sampleOpen ? "1" : "0");
+  }, [sampleOpen]);
+  useEffect(() => {
+    localStorage.setItem("smpl-tool.publish.open", publishOpen ? "1" : "0");
+  }, [publishOpen]);
+  // Bottom-row columns: a collapsed flank shrinks to a 2.5rem strip and the
+  // Library (centre) absorbs the freed width.
+  const bottomCols =
+    !sampleOpen && !publishOpen
+      ? "lg:grid-cols-[2.5rem_minmax(0,2.2fr)_2.5rem]"
+      : !sampleOpen
+        ? "lg:grid-cols-[2.5rem_minmax(0,2.2fr)_minmax(0,1fr)]"
+        : !publishOpen
+          ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,2.2fr)_2.5rem]"
+          : "lg:grid-cols-[minmax(0,1fr)_minmax(0,2.2fr)_minmax(0,1fr)]";
   useEffect(() => {
     localStorage.setItem(LIBRARY_EXPANDED_KEY, libraryExpanded ? "1" : "0");
   }, [libraryExpanded]);
@@ -570,6 +595,7 @@ export default function App() {
             icon={<AudioWaveform size={14} />}
             value={density}
             options={[
+              { value: "super-slim", label: "super" },
               { value: "slim", label: "slim" },
               { value: "wide", label: "wide" },
             ]}
@@ -691,17 +717,20 @@ export default function App() {
         )}
       </div>
 
-      {/* Bottom-row chip strip — Sample / Library / Publish. Library keeps the
-          widest column so the file list breathes; Sample + Publish flank it at
-          equal width, wide enough to carry the growing labelling /
-          categorisation controls (role, provenance, musical values).
-          items-start keeps a collapsed card from stretching to match a tall
-          sibling. */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.4fr)_minmax(0,1.3fr)] gap-4 items-start">
+      {/* Bottom-row chip strip — Sample / Library / Publish. Library is the
+          dominant column so the deep artist/release/file list breathes; Sample
+          + Publish flank it at equal (tightened) width. items-stretch makes the
+          expanded flanks match Library's height; a content-collapsed panel
+          opts out with self-start so it stays short. */}
+      <div
+        className={`grid grid-cols-1 gap-4 items-stretch ${bottomCols}`}
+      >
         <InfoPanel
           file={focusedFile}
           audioInfo={focusedAudioInfo}
           rootDir={libDir}
+          collapsed={!sampleOpen}
+          onToggleCollapsed={() => setSampleOpen((o) => !o)}
         />
         <FileBrowser
           onSelect={loadIntoFocused}
@@ -718,6 +747,8 @@ export default function App() {
           identity={identity}
           setIdentity={setIdentity}
           identityLoadError={identityLoadError}
+          collapsed={!publishOpen}
+          onToggleCollapsed={() => setPublishOpen((o) => !o)}
         />
       </div>
 
@@ -808,7 +839,12 @@ function MasterStrip({
   // regardless of the per-Track density. Master is the deck's primary
   // control surface, so the transport row earns prominence over
   // matching the per-Track button geometry.
-  const cardPad = density === "slim" ? "px-4 py-3" : "px-5 py-3.5";
+  const cardPad =
+    density === "wide"
+      ? "px-5 py-3.5"
+      : density === "super-slim"
+        ? "px-3 py-2"
+        : "px-4 py-3";
   // Three button size tiers:
   //  - transport: 48px square, big icons — primary playback
   //  - utility: 40px square, smaller icons — recovery / audio toggle
