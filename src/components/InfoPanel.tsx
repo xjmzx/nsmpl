@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import { Section } from "./Section";
+import { CollapsedStrip } from "./CollapsedStrip";
 import {
   resolveSource,
   type AudioFile,
@@ -8,8 +9,6 @@ import {
   type SourceResolution,
 } from "../lib/tauri";
 import { cn } from "../lib/cn";
-
-const EXPANDED_KEY = "smpl-tool.sample.expanded";
 
 const MIME_BY_EXT: Record<string, string> = {
   wav: "audio/wav",
@@ -78,16 +77,19 @@ interface InfoPanelProps {
   audioInfo: AudioInfo | null;
   // The loaded library directory — the de-facto root for relative-path display.
   rootDir?: string;
+  // Horizontal collapse: when true the panel renders as a thin strip and the
+  // flank's width is reclaimed for the Library (state owned by App).
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
-export function InfoPanel({ file, audioInfo, rootDir }: InfoPanelProps) {
-  const [expanded, setExpanded] = useState(() =>
-    localStorage.getItem(EXPANDED_KEY) === "1",
-  );
-  useEffect(() => {
-    localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
-  }, [expanded]);
-
+export function InfoPanel({
+  file,
+  audioInfo,
+  rootDir,
+  collapsed,
+  onToggleCollapsed,
+}: InfoPanelProps) {
   // Manifest-based resolution (named root + clip→source track). Resolved in
   // Rust against ~/.config/ndisc-suite/roots.json; null while pending or when
   // the manifest is absent, in which case we fall back to the de-facto root
@@ -117,34 +119,26 @@ export function InfoPanel({ file, audioInfo, rootDir }: InfoPanelProps) {
     ? sourceTrack.split("/").pop() || sourceTrack
     : null;
 
-  const summary = !file
-    ? null
-    : [
-        audioInfo && `${(audioInfo.sampleRate / 1000).toFixed(1)} kHz`,
-        audioInfo && fmtChannels(audioInfo.channels),
-        audioInfo && fmtDuration(audioInfo.duration),
-        fmtSize(file.size),
-        mime,
-      ]
-        .filter(Boolean)
-        .join(" · ");
+  if (collapsed) {
+    return (
+      <CollapsedStrip
+        label="Sample"
+        icon={<Info size={16} />}
+        side="left"
+        onExpand={() => onToggleCollapsed?.()}
+        className="border-accent/30"
+      />
+    );
+  }
 
   return (
     <Section
       title="Sample"
       icon={<Info size={16} />}
-      onTitleClick={() => setExpanded((p) => !p)}
-      className={cn("border-accent/30", !expanded && "min-h-[5rem]")}
+      onTitleClick={onToggleCollapsed}
+      className="border-accent/30"
     >
-      {!expanded ? (
-        <p className="text-xs text-accent truncate" title={summary ?? ""}>
-          {file
-            ? audioInfo
-              ? summary
-              : `${summary} · decoding…`
-            : "Select a sample on the left."}
-        </p>
-      ) : !file ? (
+      {!file ? (
         <p className="text-xs text-muted">Select a sample on the left.</p>
       ) : (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">

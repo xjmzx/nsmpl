@@ -11,6 +11,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Section } from "./Section";
+import { CollapsedStrip } from "./CollapsedStrip";
 import { readAudioFile, type AudioFile } from "../lib/tauri";
 import {
   DEFAULT_NIP96_ENDPOINT,
@@ -31,7 +32,6 @@ const DEFAULT_RELAYS = [
   "wss://relay.primal.net",
 ];
 
-const EXPANDED_KEY = "smpl-tool.nostr.expanded";
 const RELAYS_KEY = "smpl-tool.relays";
 
 function loadRelays(): string[] {
@@ -46,10 +46,6 @@ function loadRelays(): string[] {
     /* fallthrough */
   }
   return DEFAULT_RELAYS;
-}
-
-function endpointHost(url: string): string {
-  return url.replace(/^https?:\/\//i, "").split("/")[0] ?? url;
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -87,6 +83,10 @@ interface NostrPanelProps {
   // view so a keychain read failure is visible instead of silently
   // landing the user on a paste-nsec screen with no clue why.
   identityLoadError?: string | null;
+  // Horizontal collapse: when true the panel renders as a thin strip and the
+  // flank's width is reclaimed for the Library (state owned by App).
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 export function NostrPanel({
@@ -94,14 +94,9 @@ export function NostrPanel({
   identity,
   setIdentity,
   identityLoadError,
+  collapsed,
+  onToggleCollapsed,
 }: NostrPanelProps) {
-  const [expanded, setExpanded] = useState(
-    () => localStorage.getItem(EXPANDED_KEY) === "1",
-  );
-  useEffect(() => {
-    localStorage.setItem(EXPANDED_KEY, expanded ? "1" : "0");
-  }, [expanded]);
-
   const [relays, setRelays] = useState<string[]>(loadRelays);
   useEffect(() => {
     localStorage.setItem(RELAYS_KEY, JSON.stringify(relays));
@@ -224,7 +219,6 @@ export function NostrPanel({
                   ? "select a sample"
                   : "Publish to Nostr";
 
-  const collapsedSummary = `relays: ${relays.length} · ${endpointHost(endpoint)}`;
   // Section icon swaps to KeyRound when logged out — the panel
   // doubles as the sign-in surface, so a key icon flags "your
   // identity lives here". Switches to the broadcast Radio glyph
@@ -236,23 +230,16 @@ export function NostrPanel({
   );
 
   const sectionTitle = "Publish";
-  const toggleExpanded = () => setExpanded((p) => !p);
 
-  if (!expanded) {
+  if (collapsed) {
     return (
-      <Section
-        title={sectionTitle}
+      <CollapsedStrip
+        label="Publish"
         icon={sectionIcon}
-        onTitleClick={toggleExpanded}
-        className="border-auburn/30 min-h-[5rem]"
-      >
-        <p
-          className="text-xs text-accent truncate font-mono"
-          title={collapsedSummary}
-        >
-          {collapsedSummary}
-        </p>
-      </Section>
+        side="right"
+        onExpand={() => onToggleCollapsed?.()}
+        className="border-auburn/30"
+      />
     );
   }
 
@@ -264,7 +251,7 @@ export function NostrPanel({
       <Section
         title={sectionTitle}
         icon={sectionIcon}
-        onTitleClick={toggleExpanded}
+        onTitleClick={onToggleCollapsed}
         className="border-auburn/30"
       >
         {identityLoadError && (
@@ -333,7 +320,7 @@ export function NostrPanel({
     <Section
       title={sectionTitle}
       icon={sectionIcon}
-      onTitleClick={toggleExpanded}
+      onTitleClick={onToggleCollapsed}
       className="border-auburn/30"
     >
       {/* ---- Relays ---- */}
