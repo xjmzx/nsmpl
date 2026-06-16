@@ -140,6 +140,10 @@ export default function App() {
     // Default true on a fresh install; user can collapse mid-session.
     () => localStorage.getItem(LIBRARY_EXPANDED_KEY) !== "0",
   );
+  // The currently-loaded library directory, lifted out of FileBrowser so the
+  // Sample panel can show a selected file's path relative to it — the de-facto
+  // "root" until the suite roots manifest lands (see ndisc terrain-roots note).
+  const [libDir, setLibDir] = useState("");
   useEffect(() => {
     localStorage.setItem(LIBRARY_EXPANDED_KEY, libraryExpanded ? "1" : "0");
   }, [libraryExpanded]);
@@ -687,18 +691,24 @@ export default function App() {
         )}
       </div>
 
-      {/* Bottom-row chip strip — Sample / Library / Publish. Library
-          replaced the aux placeholder and claims the middle slot's wider
-          column (2fr) so the file list breathes; Sample + Publish flank
-          it at 1fr each. items-start keeps a collapsed card from
-          stretching to match a tall sibling. */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
-        <InfoPanel file={focusedFile} audioInfo={focusedAudioInfo} />
+      {/* Bottom-row chip strip — Sample / Library / Publish. Library keeps the
+          widest column so the file list breathes; Sample + Publish flank it at
+          equal width, wide enough to carry the growing labelling /
+          categorisation controls (role, provenance, musical values).
+          items-start keeps a collapsed card from stretching to match a tall
+          sibling. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.4fr)_minmax(0,1.3fr)] gap-4 items-start">
+        <InfoPanel
+          file={focusedFile}
+          audioInfo={focusedAudioInfo}
+          rootDir={libDir}
+        />
         <FileBrowser
           onSelect={loadIntoFocused}
           selected={focusedFile}
           reloadKey={editCount}
           onListing={handleListing}
+          onDir={setLibDir}
           expanded={libraryExpanded}
           onToggleExpand={() => setLibraryExpanded((p) => !p)}
           density={density}

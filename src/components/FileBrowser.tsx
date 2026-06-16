@@ -49,6 +49,9 @@ interface FileBrowserProps {
   // this to restore persisted Track 1 / Track 2 selections once the
   // library is back.
   onListing?: (files: AudioFile[]) => void;
+  // Fired with the directory path after every successful listing — lets the
+  // parent treat the loaded dir as the de-facto root for relative-path display.
+  onDir?: (dir: string) => void;
   // Whole-panel collapse — when false, only the title bar renders.
   expanded?: boolean;
   /** Slim/wide density — matches the per-track Player's density so the
@@ -114,6 +117,7 @@ export function FileBrowser({
   selected,
   reloadKey,
   onListing,
+  onDir,
   expanded = true,
   onToggleExpand,
   density = "slim",
@@ -130,6 +134,8 @@ export function FileBrowser({
   // the listing effect (or, in the worst case, cause an infinite loop).
   const onListingRef = useRef(onListing);
   onListingRef.current = onListing;
+  const onDirRef = useRef(onDir);
+  onDirRef.current = onDir;
 
   async function loadDir(path: string) {
     if (!path) return;
@@ -141,6 +147,7 @@ export function FileBrowser({
       setDir(path);
       localStorage.setItem(DIR_KEY, path);
       onListingRef.current?.(items);
+      onDirRef.current?.(path);
     } catch (e) {
       setError(String(e));
       setFiles([]);

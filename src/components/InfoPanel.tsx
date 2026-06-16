@@ -51,12 +51,31 @@ function fmtChannels(n: number): string {
   return `${n}-ch`;
 }
 
+// Express a file path relative to a root directory, as { root, rel } where
+// `root` is the root's basename (its de-facto name) and `rel` is the path
+// beneath it. Returns null when the file isn't under the root. This is the
+// first, single-root version of the suite's (named root, relpath) identity —
+// the loaded library dir stands in as the root until a roots manifest lands.
+function relUnderRoot(
+  root: string,
+  full: string,
+): { root: string; rel: string } | null {
+  if (!root || !full) return null;
+  const norm = root.replace(/\/+$/, "");
+  if (!full.startsWith(norm + "/")) return null;
+  const rel = full.slice(norm.length + 1);
+  const name = norm.split("/").pop() || norm;
+  return { root: name, rel };
+}
+
 interface InfoPanelProps {
   file: AudioFile | null;
   audioInfo: AudioInfo | null;
+  // The loaded library directory — the de-facto root for relative-path display.
+  rootDir?: string;
 }
 
-export function InfoPanel({ file, audioInfo }: InfoPanelProps) {
+export function InfoPanel({ file, audioInfo, rootDir }: InfoPanelProps) {
   const [expanded, setExpanded] = useState(() =>
     localStorage.getItem(EXPANDED_KEY) === "1",
   );
@@ -65,6 +84,7 @@ export function InfoPanel({ file, audioInfo }: InfoPanelProps) {
   }, [expanded]);
 
   const mime = file ? mimeFor(file.name) : null;
+  const source = file ? relUnderRoot(rootDir ?? "", file.path) : null;
 
   const summary = !file
     ? null
@@ -98,6 +118,18 @@ export function InfoPanel({ file, audioInfo }: InfoPanelProps) {
       ) : (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
           <Row label="name" value={file.name} mono />
+          {source && (
+            <>
+              <dt className="text-muted text-[10px] uppercase tracking-wide">
+                source
+              </dt>
+              <dd className="font-mono truncate" title={`${source.root}/${source.rel}`}>
+                <span className="text-accent">{source.root}</span>
+                <span className="text-muted">/</span>
+                <span className="text-fg/90">{source.rel}</span>
+              </dd>
+            </>
+          )}
           <Row label="path" value={file.path} mono truncate />
           <Row label="size" value={fmtSize(file.size)} />
           <Row label="modified" value={fmtDate(file.modified)} />
