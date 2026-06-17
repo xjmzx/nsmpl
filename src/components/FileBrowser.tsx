@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
+import { LeafIcon } from "./LeafIcon";
 import {
   listAudioFiles,
   listLeafFolders,
@@ -17,6 +18,36 @@ import {
   type FolderEntry,
 } from "../lib/tauri";
 import { cn } from "../lib/cn";
+
+// Foliage meter — a fixed-width magnitude gauge shared in spirit with
+// ndisc.tree's Library: three leaf slots, the first `litCount(n)` lit. The
+// exact figure is unimportant on the row (it's in the title/hover) — the point
+// is a glanceable "how many leaves (tracks)", and the fixed three-slot width
+// keeps every release row aligned.
+function litCount(n: number): number {
+  if (n <= 0) return 0;
+  return n >= 50 ? 3 : n >= 10 ? 2 : 1;
+}
+
+function LeafMeter({ n, title }: { n: number; title: string }) {
+  const lit = litCount(n);
+  return (
+    <span
+      className="inline-flex items-center justify-end gap-0.5"
+      title={title}
+      aria-label={title}
+    >
+      {[0, 1, 2].map((i) => (
+        <LeafIcon
+          key={i}
+          size={12}
+          // leaves share the filter toggle's ~10°-past-12:00 lean.
+          className={cn("rotate-[10deg]", i < lit ? "text-ok" : "text-muted/25")}
+        />
+      ))}
+    </span>
+  );
+}
 
 type Density = "super-slim" | "slim" | "wide";
 
@@ -121,9 +152,11 @@ function fmtModified(unixSec: number): string {
 // Three-column grid shared by header + rows so the headers line up with
 // their values.
 const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem] gap-3 items-center";
-// Folder-mode grid: dot | artist | release | count.
+// Folder-mode grid: artist | release | leaf meter. The leaf meter doubles as
+// the audio-presence cue — lit (green) leaves when the release holds audio,
+// all-dim when it's a sampling gap — so no separate dot column is needed.
 const FOLDER_GRID_CLS =
-  "grid grid-cols-[0.75rem_1fr_1fr_2.5rem] gap-2 items-center";
+  "grid grid-cols-[1fr_1fr_3.5rem] gap-2 items-center";
 
 // Split a folder rel ("Artist/Release[/Disc]") into artist + release columns.
 function splitRel(rel: string): { artist: string; release: string } {
@@ -408,43 +441,50 @@ export function FileBrowser({
         )}
       </div>
 
-      {/* Folder-mode has/no-audio filter — round themed dot for releases that
-          contain audio, hollow for sampling gaps. */}
+      {/* Folder-mode audio filter — a single cycling leaf toggle, the same
+          control ndisc.tree uses: off → has audio (green) → no audio /
+          sampling gaps (purple) → off. */}
       {folderMode && (
-        <div className="mt-2 flex items-center gap-1 text-[10px]">
-          {(
-            [
-              ["all", "all", folderTotals.all],
-              ["has", "has audio", folderTotals.has],
-              ["none", "no audio", folderTotals.none],
-            ] as const
-          ).map(([key, label, count]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setAudioFilter(key)}
-              aria-pressed={audioFilter === key}
-              className={cn(
-                "flex items-center gap-1 px-2 py-0.5 rounded-md transition-colors tabular-nums",
-                audioFilter === key
-                  ? "bg-surface text-fg"
-                  : "text-muted hover:text-fg hover:bg-surface/50",
-              )}
-            >
-              {key !== "all" && (
-                <span
+        <div className="mt-2 flex items-center gap-2 text-[10px]">
+          {(() => {
+            const next = { all: "has", has: "none", none: "all" } as const;
+            const STATE = {
+              all: {
+                cls: "bg-surface text-muted hover:text-fg",
+                title: `All ${folderTotals.all} releases. Click to show only releases with audio.`,
+                label: "all releases",
+              },
+              has: {
+                cls: "bg-accent text-bg",
+                title: `${folderTotals.has} releases with audio. Click to show only sampling gaps.`,
+                label: "with audio",
+              },
+              none: {
+                cls: "bg-mauve text-bg",
+                title: `${folderTotals.none} sampling gaps (no audio). Click to clear.`,
+                label: "sampling gaps",
+              },
+            };
+            const s = STATE[audioFilter];
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAudioFilter(next[audioFilter])}
+                  aria-pressed={audioFilter !== "all"}
+                  aria-label="Audio filter"
+                  title={s.title}
                   className={cn(
-                    "w-2 h-2 rounded-full",
-                    key === "has"
-                      ? "bg-digital"
-                      : "border border-muted/70",
+                    "flex items-center justify-center h-7 w-7 rounded-md transition-colors",
+                    s.cls,
                   )}
-                />
-              )}
-              {label}
-              <span className="text-muted/70">{count}</span>
-            </button>
-          ))}
+                >
+                  <LeafIcon size={18} className="rotate-[10deg]" />
+                </button>
+                <span className="text-muted">{s.label}</span>
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -463,10 +503,11 @@ export function FileBrowser({
         >
           {folderMode ? (
             <>
-              <span aria-hidden="true" />
               <span>artist</span>
               <span>release</span>
-              <span className="text-right">♪</span>
+              <span className="flex justify-end">
+                <LeafIcon size={11} className="rotate-[10deg]" />
+              </span>
             </>
           ) : (
             <>
@@ -516,17 +557,13 @@ export function FileBrowser({
                     )}
                     title={`${fld.path} · ${fld.audioCount} audio file${fld.audioCount === 1 ? "" : "s"}`}
                   >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "w-2 h-2 rounded-full",
-                        hasAudio ? "bg-digital" : "border border-muted/70",
-                      )}
-                    />
                     <span className="truncate text-muted">{artist}</span>
                     <span className="truncate">{release}</span>
-                    <span className="text-muted text-right shrink-0 tabular-nums">
-                      {fld.audioCount}
+                    <span className="shrink-0">
+                      <LeafMeter
+                        n={fld.audioCount}
+                        title={`${fld.audioCount} audio file${fld.audioCount === 1 ? "" : "s"}`}
+                      />
                     </span>
                   </li>
                 );

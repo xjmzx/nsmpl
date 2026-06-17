@@ -19,6 +19,7 @@ export default {
         fg: c("--c-fg"),
         muted: c("--c-muted"),
         accent: c("--c-accent"),
+        digital: c("--c-digital"),
         ok: c("--c-ok"),
         warn: c("--c-warn"),
         alert: c("--c-alert"),
