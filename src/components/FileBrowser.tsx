@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
-import { LeafIcon } from "./LeafIcon";
+import { LeafIcon, LeafDots } from "./LeafIcon";
 import {
   listAudioFiles,
   listLeafFolders,
@@ -18,36 +18,6 @@ import {
   type FolderEntry,
 } from "../lib/tauri";
 import { cn } from "../lib/cn";
-
-// Foliage meter — a fixed-width magnitude gauge shared in spirit with
-// ndisc.tree's Library: three leaf slots, the first `litCount(n)` lit. The
-// exact figure is unimportant on the row (it's in the title/hover) — the point
-// is a glanceable "how many leaves (tracks)", and the fixed three-slot width
-// keeps every release row aligned.
-function litCount(n: number): number {
-  if (n <= 0) return 0;
-  return n >= 50 ? 3 : n >= 10 ? 2 : 1;
-}
-
-function LeafMeter({ n, title }: { n: number; title: string }) {
-  const lit = litCount(n);
-  return (
-    <span
-      className="inline-flex items-center justify-end gap-0.5"
-      title={title}
-      aria-label={title}
-    >
-      {[0, 1, 2].map((i) => (
-        <LeafIcon
-          key={i}
-          size={12}
-          // leaves share the filter toggle's ~10°-past-12:00 lean.
-          className={cn("rotate-[10deg]", i < lit ? "text-ok" : "text-muted/25")}
-        />
-      ))}
-    </span>
-  );
-}
 
 type Density = "super-slim" | "slim" | "wide";
 
@@ -559,11 +529,8 @@ export function FileBrowser({
                   >
                     <span className="truncate text-muted">{artist}</span>
                     <span className="truncate">{release}</span>
-                    <span className="shrink-0">
-                      <LeafMeter
-                        n={fld.audioCount}
-                        title={`${fld.audioCount} audio file${fld.audioCount === 1 ? "" : "s"}`}
-                      />
+                    <span className="shrink-0 flex justify-end">
+                      <LeafDots n={fld.audioCount} unit="audio file" />
                     </span>
                   </li>
                 );

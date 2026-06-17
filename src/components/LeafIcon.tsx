@@ -1,13 +1,10 @@
 import type { SVGProps } from "react";
+import { cn } from "../lib/cn";
 
 /**
- * The suite's "leaf" glyph — a simple almond blade + midrib, drawn in the
- * lucide idiom (24×24, currentColor stroke, round caps/joins, stroke-width 2)
- * so it drops in anywhere a lucide icon does: `<LeafIcon size={14} />`.
- *
- * Shared with ndisc.tree (and the canonical ndisc): a clip is a leaf you've
- * plucked from the tree, so the leaf is the suite-wide mark for sample/clip
- * and audio-presence affordances.
+ * The suite's "leaf" glyph — a simple almond blade + midrib in the lucide
+ * idiom. Used for affordance / brand marks (the audio filter toggle, headers).
+ * Quantity is shown with LeafDots.
  */
 export function LeafIcon({
   size = 24,
@@ -27,10 +24,43 @@ export function LeafIcon({
       aria-hidden="true"
       {...props}
     >
-      {/* blade — pointed almond (tip top, stem base bottom) */}
       <path d="M12 21C6 16 6 9 12 4C18 9 18 16 12 21Z" />
-      {/* midrib */}
       <path d="M12 20V5" />
     </svg>
+  );
+}
+
+/**
+ * Leaf-dots — the suite's diagrammatic quantity glyph (shared with ndisc /
+ * ndisc.tree). A leaf is a track/clip; each one is a flat, muted leaf-green
+ * dot, and the dots stack into a compact cluster (wrap at 5 per row) so the
+ * count itself is the picture. Renders nothing for 0 (a sampling gap). Capped
+ * at `max` (default 99); the exact figure stays in the hover title.
+ */
+export function LeafDots({
+  n,
+  max = 99,
+  unit = "track",
+  className,
+}: {
+  n: number | null | undefined;
+  max?: number;
+  unit?: string;
+  className?: string;
+}) {
+  const raw = Math.max(n ?? 0, 0);
+  const count = Math.min(raw, max);
+  if (count <= 0) return null;
+  const title = `${raw}${raw >= max ? "+" : ""} ${unit}${raw === 1 ? "" : "s"}`;
+  return (
+    <span
+      className={cn("inline-grid grid-cols-5 gap-[2px] w-max", className)}
+      title={title}
+      aria-label={title}
+    >
+      {Array.from({ length: count }, (_, i) => (
+        <span key={i} className="w-1 h-1 rounded-full bg-ok/70" />
+      ))}
+    </span>
   );
 }
