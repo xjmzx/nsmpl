@@ -37,29 +37,60 @@ export function LeafIcon({
  * count itself is the picture. Renders nothing for 0 (a sampling gap). Capped
  * at `max` (default 99); the exact figure stays in the hover title.
  */
+// Optimal column count for `n` dots within `maxCols`: single row up to the
+// smaller of 5 / maxCols, then the fewest rows that fit, columns balanced
+// (6→2×3, 8→2×4, 7→4+3). Low maxCols = taller/narrower; high = shorter/wider.
+function dotCols(n: number, maxCols: number): number {
+  if (n <= Math.min(5, maxCols)) return n;
+  const rows = Math.ceil(n / maxCols);
+  return Math.ceil(n / rows);
+}
+
 export function LeafDots({
   n,
+  total,
   max = 99,
   unit = "track",
+  maxCols = 5,
   className,
 }: {
+  /** Present count (solid green dots). */
   n: number | null | undefined;
+  /** Expected total — extra (missing) slots render at 25%. */
+  total?: number | null;
   max?: number;
   unit?: string;
+  /** Max dots per row — lower = taller/narrower, higher = shorter/wider. */
+  maxCols?: number;
   className?: string;
 }) {
-  const raw = Math.max(n ?? 0, 0);
-  const count = Math.min(raw, max);
-  if (count <= 0) return null;
-  const title = `${raw}${raw >= max ? "+" : ""} ${unit}${raw === 1 ? "" : "s"}`;
+  const present = Math.min(Math.max(n ?? 0, 0), max);
+  const expected = total != null ? Math.min(Math.max(total, 0), max) : present;
+  const shown = Math.max(present, expected);
+  if (shown <= 0) return null;
+  const missing = Math.max(expected - present, 0);
+  const cols = dotCols(shown, maxCols);
+  const title =
+    total != null
+      ? `${present} of ${total} ${unit}${total === 1 ? "" : "s"}${
+          missing > 0 ? ` · ${missing} missing` : " · complete"
+        }`
+      : `${present}${present >= max ? "+" : ""} ${unit}${present === 1 ? "" : "s"}`;
   return (
     <span
-      className={cn("inline-grid grid-cols-5 gap-[2px] w-max", className)}
+      className={cn("inline-grid gap-[2px] w-max", className)}
+      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       title={title}
       aria-label={title}
     >
-      {Array.from({ length: count }, (_, i) => (
-        <span key={i} className="w-1 h-1 rounded-full bg-ok/70" />
+      {Array.from({ length: shown }, (_, i) => (
+        <span
+          key={i}
+          className={cn(
+            "w-1 h-1 rounded-full",
+            i < present ? "bg-ok/70" : "bg-ok/25",
+          )}
+        />
       ))}
     </span>
   );
