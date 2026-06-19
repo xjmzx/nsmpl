@@ -1,24 +1,90 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#313244"/>
-      <stop offset="100%" stop-color="#1e1e2e"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="128"
+   height="128"
+   viewBox="0 0 128 128"
+   version="1.1"
+   id="svg5"
+   sodipodi:docname="nsmpl.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview5"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="6.109375"
+     inkscape:cx="64.081841"
+     inkscape:cy="63.836317"
+     inkscape:window-width="1920"
+     inkscape:window-height="1003"
+     inkscape:window-x="1920"
+     inkscape:window-y="40"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5" />
+  <defs
+     id="defs2">
+    <linearGradient
+       id="bg"
+       x1="0"
+       y1="0"
+       x2="0"
+       y2="1">
+      <stop
+         offset="0%"
+         stop-color="#313244"
+         id="stop1" />
+      <stop
+         offset="0.29501203"
+         stop-color="#1e1e2e"
+         id="stop2"
+         style="stop-color:#09090f;stop-opacity:1;" />
     </linearGradient>
   </defs>
-  <rect x="4" y="4" width="120" height="120" rx="22" ry="22" fill="url(#bg)"/>
-  <rect x="4" y="4" width="120" height="120" rx="22" ry="22"
-        fill="none" stroke="#89b4fa" stroke-width="3" opacity="0.6"/>
-  <text x="64" y="56" font-family="Helvetica, Arial, sans-serif" font-size="28"
-        font-weight="bold" fill="#89b4fa" text-anchor="middle">smpl</text>
+  <rect
+     x="4"
+     y="4"
+     width="120"
+     height="120"
+     rx="22"
+     ry="22"
+     fill="url(#bg)"
+     id="rect2" />
+  <text
+     x="64"
+     y="56"
+     font-family="Helvetica, Arial, sans-serif"
+     font-size="28px"
+     font-weight="bold"
+     fill="#89b4fa"
+     text-anchor="middle"
+     id="text3">nsmpl</text>
   <!-- Looping waveform: in/out brackets bookend an oscillating line -->
-  <g stroke="#a6e3a1" stroke-width="3.5" stroke-linecap="round"
-     stroke-linejoin="round" fill="none">
+  <g
+     stroke="#a6e3a1"
+     stroke-width="3.5"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     fill="none"
+     id="g5">
     <!-- in bracket -->
-    <path d="M 22 86 L 22 100 L 28 100"/>
+    <path
+       d="M 22 86 L 22 100 L 28 100"
+       id="path3" />
     <!-- waveform between brackets -->
-    <path d="M 30 95 L 36 80 L 42 100 L 48 76 L 54 100 L 60 84 L 66 100 L 72 80 L 78 100 L 84 88 L 90 100 L 96 84"/>
+    <path
+       d="M 30 95 L 36 80 L 42 100 L 48 76 L 54 100 L 60 84 L 66 100 L 72 80 L 78 100 L 84 88 L 90 100 L 96 84"
+       id="path4" />
     <!-- out bracket -->
-    <path d="M 100 100 L 106 100 L 106 86"/>
+    <path
+       d="M 100 100 L 106 100 L 106 86"
+       id="path5" />
   </g>
 </svg>
