@@ -530,7 +530,12 @@ export function FileBrowser({
                     <span className="truncate text-muted">{artist}</span>
                     <span className="truncate">{release}</span>
                     <span className="shrink-0 flex justify-end">
-                      <LeafDots n={fld.audioCount} unit="audio file" maxCols={8} />
+                      <LeafDots
+                        n={fld.audioCount}
+                        unit="audio file"
+                        maxCols={8}
+                        maxRows={4}
+                      />
                     </span>
                   </li>
                 );
