@@ -98,8 +98,14 @@ export function LeafDots({
 
   return (
     <span
+      // Fill right-to-left so a ragged/incomplete row's gap lands on the LEFT
+      // (the short single-leaf column sits nearest the release title) and the
+      // full multi-row columns build outward to the right.
       className={cn("inline-grid gap-[2px] w-max", className)}
-      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+      style={{
+        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        direction: "rtl",
+      }}
       title={title}
       aria-label={title}
     >
