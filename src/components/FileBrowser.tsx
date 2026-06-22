@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Film,
   FolderInput,
   FolderOpen,
   RefreshCw,
@@ -516,6 +517,8 @@ export function FileBrowser({
               {shownFolders.map((fld) => {
                 const { artist, release } = splitRel(fld.rel);
                 const hasAudio = fld.audioCount > 0;
+                // A video-only folder isn't a sampling "gap" — don't dim it.
+                const hasMedia = hasAudio || fld.videoCount > 0;
                 return (
                   <li
                     key={fld.path}
@@ -523,13 +526,29 @@ export function FileBrowser({
                     className={cn(
                       FOLDER_GRID_CLS,
                       "px-3 py-2 text-xs font-mono cursor-pointer hover:bg-surface/40",
-                      !hasAudio && "text-muted",
+                      !hasMedia && "text-muted",
                     )}
-                    title={`${fld.path} · ${fld.audioCount} audio file${fld.audioCount === 1 ? "" : "s"}`}
+                    title={
+                      `${fld.path} · ${fld.audioCount} audio file${fld.audioCount === 1 ? "" : "s"}` +
+                      (fld.videoCount > 0
+                        ? ` · ${fld.videoCount} video file${fld.videoCount === 1 ? "" : "s"}`
+                        : "")
+                    }
                   >
                     <span className="truncate text-muted">{artist}</span>
                     <span className="truncate">{release}</span>
-                    <span className="shrink-0 flex justify-end">
+                    <span className="shrink-0 flex items-center justify-end gap-1.5">
+                      {fld.videoCount > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-mauve"
+                          title={`${fld.videoCount} video file${fld.videoCount === 1 ? "" : "s"}`}
+                        >
+                          <Film size={11} className="shrink-0" />
+                          {fld.videoCount > 1 && (
+                            <span className="text-[10px]">{fld.videoCount}</span>
+                          )}
+                        </span>
+                      )}
                       <LeafDots
                         n={fld.audioCount}
                         unit="audio file"
@@ -562,9 +581,18 @@ export function FileBrowser({
                     "hover:bg-surface/40",
                     selected?.path === f.path && "bg-surface/70 text-accent",
                   )}
-                  title={f.path}
+                  title={f.isVideo ? `${f.path} · video` : f.path}
                 >
-                  <span className="truncate">{f.name}</span>
+                  <span className="truncate inline-flex items-center gap-1.5 min-w-0">
+                    {f.isVideo && (
+                      <Film
+                        size={11}
+                        className="shrink-0 text-mauve"
+                        aria-label="video"
+                      />
+                    )}
+                    <span className="truncate">{f.name}</span>
+                  </span>
                   <span className="text-muted text-right shrink-0">
                     {fmtSize(f.size)}
                   </span>

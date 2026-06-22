@@ -8,6 +8,9 @@ export interface AudioFile {
   // Path relative to the listed root. Flat listing → just the filename;
   // deep listing → "artist/release/…/file" (split for the columns).
   rel: string;
+  // True for a video (audio-visual) file rather than audio — the browser
+  // lists it (full media spectrum) and marks it; smpl doesn't sample/play it.
+  isVideo: boolean;
 }
 
 export interface AudioInfo {
@@ -32,6 +35,7 @@ export interface FolderEntry {
   rel: string; // "Artist/Release" relative to the listed root
   path: string; // absolute, for drilling in
   audioCount: number;
+  videoCount: number; // direct video files — marks releases carrying A/V
 }
 
 /// List leaf folders under `dir` with audio counts — the folder-grain

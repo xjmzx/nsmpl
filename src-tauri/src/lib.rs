@@ -15,6 +15,13 @@ const AUDIO_EXTENSIONS: &[&str] = &[
     "wav", "flac", "mp3", "ogg", "oga", "opus", "m4a", "aac", "aif", "aiff", "wv",
 ];
 
+// Video (audio-visual) extensions — the same set ndisc recognises, so the
+// suite shares one definition of "carries video". smpl surfaces them as part
+// of the full media spectrum; it does not analyse or play them (yet).
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "mkv", "mov", "webm", "m4v", "avi", "wmv", "flv", "mpg", "mpeg", "ogv",
+];
+
 const KEYRING_SERVICE_RELEASE: &str = "smpl-tool";
 const KEYRING_SERVICE_DEV: &str = "smpl-tool-dev";
 const KEYRING_USER: &str = "default";
@@ -42,6 +49,9 @@ struct AudioFile {
     /// filename; for a deep listing it's `artist/release/…/file`, which the
     /// frontend splits into artist / release columns (blobtree-style).
     rel: String,
+    /// True when this is a video (audio-visual) file rather than audio. Lets
+    /// the browser mark it; smpl doesn't sample/play video.
+    is_video: bool,
 }
 
 fn is_audio_ext(p: &Path) -> bool {
@@ -52,6 +62,22 @@ fn is_audio_ext(p: &Path) -> bool {
             AUDIO_EXTENSIONS.iter().any(|&x| x == lower)
         })
         .unwrap_or(false)
+}
+
+fn is_video_ext(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let lower = e.to_ascii_lowercase();
+            VIDEO_EXTENSIONS.iter().any(|&x| x == lower)
+        })
+        .unwrap_or(false)
+}
+
+/// Either audio or video — the files the browser lists across the full media
+/// spectrum.
+fn is_media_ext(p: &Path) -> bool {
+    is_audio_ext(p) || is_video_ext(p)
 }
 
 #[tauri::command]
@@ -65,7 +91,7 @@ fn list_audio_files(dir: String) -> Result<Vec<AudioFile>, String> {
         .filter_map(|res| res.ok())
         .filter_map(|entry| {
             let p = entry.path();
-            if !p.is_file() || !is_audio_ext(&p) {
+            if !p.is_file() || !is_media_ext(&p) {
                 return None;
             }
             let meta = entry.metadata().ok()?;
@@ -82,6 +108,7 @@ fn list_audio_files(dir: String) -> Result<Vec<AudioFile>, String> {
                 name,
                 size: meta.len(),
                 modified,
+                is_video: is_video_ext(&p),
             })
         })
         .collect();
@@ -106,7 +133,7 @@ fn collect_audio_deep(dir: &Path, base: &Path, out: &mut Vec<AudioFile>) {
         let p = entry.path();
         if p.is_dir() {
             collect_audio_deep(&p, base, out);
-        } else if p.is_file() && is_audio_ext(&p) {
+        } else if p.is_file() && is_media_ext(&p) {
             let Ok(meta) = entry.metadata() else { continue };
             let modified = meta
                 .modified()
@@ -124,6 +151,7 @@ fn collect_audio_deep(dir: &Path, base: &Path, out: &mut Vec<AudioFile>) {
                 size: meta.len(),
                 modified,
                 rel,
+                is_video: is_video_ext(&p),
             });
         }
     }
@@ -153,6 +181,9 @@ struct FolderEntry {
     /// Count of audio files directly inside this leaf folder (0 ⇒ a gap —
     /// a release folder where no clips landed).
     audio_count: usize,
+    /// Count of video files directly inside this leaf folder — lets the UI
+    /// mark releases that carry audio-visual content.
+    video_count: usize,
 }
 
 /// Walk to the *leaf* folders under `dir` (those with no child directories —
@@ -180,10 +211,18 @@ fn collect_leaf_folders(dir: &Path, base: &Path, out: &mut Vec<FolderEntry>) {
                 p.is_file() && is_audio_ext(&p)
             })
             .count();
+        let video_count = entries
+            .iter()
+            .filter(|e| {
+                let p = e.path();
+                p.is_file() && is_video_ext(&p)
+            })
+            .count();
         out.push(FolderEntry {
             rel: rel.to_string_lossy().into_owned(),
             path: dir.to_string_lossy().into_owned(),
             audio_count,
+            video_count,
         });
     } else {
         subdirs.sort();
