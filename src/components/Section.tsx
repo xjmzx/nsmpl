@@ -48,7 +48,8 @@ export function Section({
         className={cn(
           "flex items-center gap-2 text-accent font-semibold",
           onTitleClick &&
-            "cursor-pointer hover:opacity-70 transition-opacity select-none",
+            "-mx-2 px-2 py-1 rounded-md cursor-pointer select-none " +
+              "bg-fg/5 shadow-inner transition-colors hover:bg-fg/10",
         )}
       >
         {icon}

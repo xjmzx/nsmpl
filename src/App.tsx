@@ -545,12 +545,11 @@ export default function App() {
                 : "Theme: upleb.uk — click to switch to fizx.uk"
             }
             aria-label="Switch colour theme"
-            className="text-3xl font-bold tracking-tight leading-none shrink-0
+            className="text-2xl font-bold tracking-tight leading-none shrink-0
                        cursor-pointer transition-opacity hover:opacity-70"
           >
             <span className="text-accent">n</span>
-            <span className="text-fg">disc</span>
-            <span className="text-mauve">.smpl</span>
+            <span className="text-mauve">smpl</span>
           </button>
           {appVersion && (
             <span
