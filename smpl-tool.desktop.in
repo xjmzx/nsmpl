@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=ndisc.smpl
+Name=nsmpl
 GenericName=Audio Sample Tool
 Comment=Browse, loop, edit and publish audio samples to Nostr (formerly smpl-tool)
 Exec=@BINDIR@/smpl-tool
