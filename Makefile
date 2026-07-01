@@ -6,7 +6,7 @@ ICONDIR ?= $(PREFIX)/share/icons/hicolor/scalable/apps
 DESKTOP_OUT := $(APPDIR)/smpl-tool.desktop
 TAURI_BIN   := src-tauri/target/release/smpl-tool
 
-.PHONY: help deps dev build install uninstall check clean
+.PHONY: help deps dev build install uninstall check clean icons
 
 help:
 	@echo "Targets:"
@@ -25,6 +25,18 @@ deps:
 
 dev:
 	npm run tauri dev
+
+# Regenerate the Tauri bundle icon set from icon.svg (run once per icon change).
+icons:
+	@if command -v rsvg-convert >/dev/null 2>&1; then \
+		rsvg-convert -w 1024 -h 1024 icon.svg -o app-icon.png; \
+	elif command -v convert >/dev/null 2>&1; then \
+		convert -background none -resize 1024x1024 icon.svg app-icon.png; \
+	else \
+		echo "need rsvg-convert (librsvg2-bin) or imagemagick"; exit 1; \
+	fi
+	npm run tauri icon ./app-icon.png
+	rm -f app-icon.png
 
 build: $(TAURI_BIN)
 
