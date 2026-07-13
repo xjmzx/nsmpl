@@ -1,5 +1,6 @@
 // Tauri commands for smpl-tool. See https://tauri.app/develop/calling-rust/
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1220,6 +1221,207 @@ fn resolve_source(path: String) -> SourceResolution {
     out
 }
 
+// ---- suite-shared BPM store -----------------------------------------------
+//
+// `~/.local/share/ndisc-suite/bpm.json`. Contract + rationale live in
+// nplay/schema/bpm-store-v1.md — read that before changing anything here. This
+// mirrors nplay's writer deliberately (same shape, same precedence rule); the
+// suite duplicates small shared pieces rather than coupling the apps.
+//
+// nsmpl's contribution is `source: "bars"`. That is a *human-asserted* value:
+// the user declares how many bars the loop region is, and the tempo falls out
+// of exact arithmetic on a loop length we know to the sample. It therefore
+// outranks anything aubio detected, and nplay will not overwrite it.
+//
+// Crucially it is written against the **source track**, not the clip: a clip is
+// an excerpt of a library track, so it is the same music at the same tempo, and
+// the source's (root, relpath) is the key the rest of the suite already uses.
+const BPM_STORE_VERSION: u32 = 1;
+const BPM_SOURCE_BARS: &str = "bars";
+const BPM_SOURCE_DETECTED: &str = "aubio";
+
+#[derive(Serialize, Deserialize, Clone)]
+struct BpmEntry {
+    bpm: f64,
+    source: String,
+    at: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmStore {
+    version: u32,
+    generated_at: i64,
+    roots: BTreeMap<String, String>,
+    entries: BTreeMap<String, BTreeMap<String, BpmEntry>>,
+}
+
+impl Default for BpmStore {
+    fn default() -> Self {
+        BpmStore {
+            version: BPM_STORE_VERSION,
+            generated_at: 0,
+            roots: BTreeMap::new(),
+            entries: BTreeMap::new(),
+        }
+    }
+}
+
+/// A detection may only overwrite another detection. A human-asserted value may
+/// overwrite anything. Phrased as *what a detection may overwrite* rather than
+/// as a list of protected names, so an unknown source is safe by default.
+/// Same rule as nplay's `bpm_may_overwrite`.
+fn bpm_may_overwrite(existing: &str, incoming: &str) -> bool {
+    if incoming == BPM_SOURCE_DETECTED {
+        return existing == BPM_SOURCE_DETECTED;
+    }
+    true
+}
+
+fn bpm_store_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".local/share/ndisc-suite/bpm.json"))
+}
+
+fn load_bpm_store() -> BpmStore {
+    let Some(p) = bpm_store_path() else {
+        return BpmStore::default();
+    };
+    let Ok(raw) = fs::read_to_string(p) else {
+        // Missing is the normal cold state, not an error.
+        return BpmStore::default();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Where a BPM for `path` belongs: the source track if `path` is a clip, else
+/// the file itself. Returns (root name, relpath, absolute target path).
+fn bpm_target(path: &str) -> Option<(String, String, String)> {
+    let res = resolve_source(path.to_string());
+    // A clip under a `mirrorOf` root → attribute the tempo to its source. Only
+    // when that source actually exists: on drift (renamed/removed) we decline
+    // rather than write against a path that isn't there.
+    if let Some(src) = res.source_path.filter(|_| res.source_exists) {
+        let sres = resolve_source(src.clone());
+        return Some((sres.root?, sres.rel?, src));
+    }
+    Some((res.root?, res.rel?, path.to_string()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmWrite {
+    /// Absolute path the BPM was actually recorded against (the source track
+    /// when the loaded file was a clip) — so the UI can say what it did.
+    target: String,
+    root: String,
+    rel: String,
+    bpm: f64,
+    /// False when an existing entry outranked this write (never for `bars`,
+    /// which is human-asserted, but kept honest rather than assumed).
+    written: bool,
+}
+
+/// Persist a bar-derived BPM against the source track. `bars` is human-asserted
+/// ground truth, so it overwrites whatever aubio guessed.
+#[tauri::command]
+fn store_bars_bpm(path: String, bpm: f64) -> Result<BpmWrite, String> {
+    if !(bpm.is_finite() && bpm > 0.0) {
+        return Err(format!("refusing to store a nonsense BPM ({bpm})"));
+    }
+    let (root_name, rel, target) = bpm_target(&path).ok_or_else(|| {
+        "this file isn't under a named suite root, so it has no stable \
+         (root, relpath) identity to store a BPM against — see \
+         ~/.config/ndisc-suite/roots.json"
+            .to_string()
+    })?;
+
+    let root_abs = target
+        .strip_suffix(&rel)
+        .map(|s| s.trim_end_matches('/').to_string())
+        .ok_or("could not derive the root's absolute path")?;
+
+    let mut store = load_bpm_store();
+    let table = store.entries.entry(root_name.clone()).or_default();
+    let mut written = false;
+    let existing_ok = table
+        .get(&rel)
+        .map(|e| bpm_may_overwrite(&e.source, BPM_SOURCE_BARS))
+        .unwrap_or(true);
+    if existing_ok {
+        table.insert(
+            rel.clone(),
+            BpmEntry {
+                bpm,
+                source: BPM_SOURCE_BARS.to_string(),
+                at: now_unix(),
+            },
+        );
+        written = true;
+    }
+
+    if written {
+        store.roots.insert(root_name.clone(), root_abs);
+        store.version = BPM_STORE_VERSION;
+        store.generated_at = now_unix();
+
+        let p = bpm_store_path().ok_or("no HOME")?;
+        let dir = p.parent().ok_or("bpm store has no parent dir")?;
+        fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        let json = serde_json::to_string_pretty(&store).map_err(|e| e.to_string())?;
+        // Atomic: other apps read this file, so a crash mid-write must not
+        // leave a half-written document behind.
+        let tmp = p.with_extension("json.tmp");
+        fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        fs::rename(&tmp, &p).map_err(|e| format!("rename {}: {e}", p.display()))?;
+    }
+
+    Ok(BpmWrite {
+        target,
+        root: root_name,
+        rel,
+        bpm,
+        written,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmKnown {
+    bpm: f64,
+    source: String,
+    at: i64,
+    /// The track this is recorded against — the source, when a clip is loaded.
+    target: String,
+}
+
+/// What the suite already knows about this file's tempo (via its source track).
+/// `Ok(None)` = nothing known, which is the ordinary case, not an error.
+#[tauri::command]
+fn known_bpm(path: String) -> Result<Option<BpmKnown>, String> {
+    let Some((root_name, rel, target)) = bpm_target(&path) else {
+        return Ok(None);
+    };
+    let store = load_bpm_store();
+    Ok(store
+        .entries
+        .get(&root_name)
+        .and_then(|t| t.get(&rel))
+        .map(|e| BpmKnown {
+            bpm: e.bpm,
+            source: e.source.clone(),
+            at: e.at,
+            target,
+        }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1242,7 +1444,9 @@ pub fn run() {
             generate_identity,
             import_identity,
             clear_identity,
-            resolve_source
+            resolve_source,
+            store_bars_bpm,
+            known_bpm
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

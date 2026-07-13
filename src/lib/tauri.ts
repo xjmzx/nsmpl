@@ -60,6 +60,46 @@ export async function resolveSource(path: string): Promise<SourceResolution> {
   return invoke<SourceResolution>("resolve_source", { path });
 }
 
+/// The suite-shared BPM store (~/.local/share/ndisc-suite/bpm.json).
+/// Contract: nplay/schema/bpm-store-v1.md.
+///
+/// A BPM is recorded against the **source track**, not the clip: a clip is an
+/// excerpt of a library track, so it's the same music at the same tempo, and
+/// the source's (root, relpath) is the key the rest of the suite uses. `target`
+/// is the path it actually landed on, so the UI can say what it did.
+
+export interface BpmWrite {
+  target: string;
+  root: string;
+  rel: string;
+  bpm: number;
+  written: boolean;
+}
+
+/// Persist the bar-derived BPM. This is a *human-asserted* value (you declared
+/// the bar count; the tempo is exact arithmetic on a known loop length), so it
+/// outranks anything aubio detected and nplay will not overwrite it.
+export async function storeBarsBpm(
+  path: string,
+  bpm: number,
+): Promise<BpmWrite> {
+  return invoke<BpmWrite>("store_bars_bpm", { path, bpm });
+}
+
+export interface BpmKnown {
+  bpm: number;
+  /// "aubio" (detected — a guess) | "tap" | "bars" (human — ground truth).
+  source: string;
+  at: number;
+  target: string;
+}
+
+/// What the suite already knows about this file's tempo, via its source track.
+/// null = nothing known, which is the ordinary case rather than an error.
+export async function knownBpm(path: string): Promise<BpmKnown | null> {
+  return invoke<BpmKnown | null>("known_bpm", { path });
+}
+
 export async function readAudioFile(path: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("read_audio_file", { path });
 }

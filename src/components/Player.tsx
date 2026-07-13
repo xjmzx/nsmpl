@@ -11,12 +11,14 @@ import {
   Crop,
   Equal,
   FileDown,
+  Check,
   Gauge,
   Loader2,
   Pause,
   Play,
   Repeat,
   Scissors,
+  Pin,
   SkipBack,
   Split,
   Square,
@@ -34,14 +36,17 @@ import { BounceStatus, type BounceView } from "./BounceStatus";
 import { EnvelopeStrip } from "./EnvelopeStrip";
 import {
   gainAudio,
+  knownBpm,
   padAtAudio,
   padEndAudio,
   padStartAudio,
   pruneAudio,
   readAudioFile,
+  storeBarsBpm,
   trimAudio,
   type AudioFile,
   type AudioInfo,
+  type BpmKnown,
 } from "../lib/tauri";
 import { cn } from "../lib/cn";
 
@@ -377,6 +382,45 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   function cycleLoopBars() {
     const i = BAR_OPTIONS.indexOf(loopBars as BarOption);
     setLoopBars(BAR_OPTIONS[(i + 1) % BAR_OPTIONS.length]);
+  }
+
+  // ---- suite-shared BPM store -------------------------------------------
+  // What the suite already knows about this track's tempo (recorded against
+  // the *source* track — a clip is an excerpt of one, so same music, same
+  // tempo). Read on load, so an aubio guess or an earlier bar-derivation is
+  // visible here rather than being silently re-derived.
+  const [stored, setStored] = useState<BpmKnown | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => {
+    setStored(null);
+    setSaveError(null);
+    if (!file?.path) return;
+    let alive = true;
+    knownBpm(file.path)
+      .then((k) => alive && setStored(k))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [file?.path]);
+
+  // Persist the bar-derived BPM. Deliberately an explicit act, not a
+  // side-effect of cycling: the displayed BPM changes with every bar-count
+  // guess, and most of those guesses are wrong. Writing on each cycle would
+  // fill the store with values the user was only passing through.
+  async function saveBarsBpm(bpm: number) {
+    if (!file?.path) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const w = await storeBarsBpm(file.path, bpm);
+      setStored({ bpm: w.bpm, source: "bars", at: 0, target: w.target });
+    } catch (e) {
+      setSaveError(String(e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Snap loop region to the next bar count in BAR_OPTIONS, preserving
@@ -1041,6 +1085,91 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                 {fmtBars(loopBars)}b
               </span>
             </button>
+
+            {/* Pin chip — commit this BPM to the suite-shared store, against
+                the SOURCE track (a clip is an excerpt of one: same music, same
+                tempo). An explicit act by design: the number above changes with
+                every bar-count guess, so auto-saving would fill the store with
+                values the user was only passing through.
+
+                `bars` is human-asserted — you declared the bar count and the
+                tempo is exact arithmetic on a known loop length — so it
+                outranks anything aubio detected, and nplay won't overwrite it.
+
+                Filled when what's stored already matches what's shown, so the
+                chip reads as state rather than as a button you must remember to
+                press. */}
+            {(() => {
+              const storedBpm = stored ? Math.round(stored.bpm) : null;
+              // Human-asserted (bars / tap) vs a machine guess (aubio). The
+              // chip must ALWAYS show what's stored, whichever it is —
+              // otherwise a pinned value is indistinguishable from nothing
+              // stored, and the persistence looks broken when it isn't.
+              const storedHuman = stored != null && stored.source !== "aubio";
+              // "Already says what I'm about to say." Note the live BPM resets
+              // with the region on every load (bars → 1, region → whole file),
+              // so this is normally false right after opening a file even when
+              // a value IS stored — which is exactly why `storedBpm` is shown
+              // independently of it.
+              const isSaved =
+                storedHuman && calcBpm != null && storedBpm === calcBpm;
+              return (
+                <button
+                  type="button"
+                  onClick={() => calcBpm && saveBarsBpm(calcBpm)}
+                  disabled={!file || !calcBpm || saving || isSaved}
+                  title={
+                    saveError
+                      ? `Could not store BPM: ${saveError}`
+                      : !file
+                        ? "Load a sample first"
+                        : isSaved
+                          ? `${storedBpm} BPM is stored for this track (${stored!.source}) — the suite reads it from ${stored!.target}`
+                          : !calcBpm
+                            ? storedHuman
+                              ? `${storedBpm} BPM is stored for this track (${stored!.source}). Dial in a loop to replace it.`
+                              : "Dial in a BPM first"
+                            : storedHuman
+                              ? `Stored: ${storedBpm} BPM (${stored!.source}). Click to REPLACE it with ${calcBpm}.\n\nRecorded against ${stored!.target}`
+                              : stored
+                                ? `aubio guessed ${storedBpm} BPM for this track. Click to replace it with your bar-derived ${calcBpm} — exact arithmetic on the loop length, so it outranks detection and aubio can never overwrite it.`
+                                : `Store ${calcBpm} BPM against the source track, so nplay and the rest of the suite know it. Bar-derived BPM is human-asserted, so aubio can never overwrite it.`
+                  }
+                  className={cn(
+                    "px-2 py-1 rounded-md text-[10px] font-mono",
+                    "inline-flex items-center gap-1 transition-colors",
+                    "disabled:cursor-not-allowed",
+                    saveError
+                      ? "bg-bg/50 text-alert"
+                      : storedHuman
+                        ? "bg-mauve/20 text-mauve hover:bg-mauve/30 disabled:opacity-100"
+                        : "bg-bg/50 hover:bg-surface/60 text-muted disabled:opacity-50",
+                  )}
+                >
+                  {saving ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : isSaved ? (
+                    <Check size={11} />
+                  ) : (
+                    <Pin size={11} />
+                  )}
+                  {/* Always show the stored number. A `?` marks a machine guess
+                      — the thing this control exists to correct; no `?` means a
+                      human asserted it and it is ground truth. */}
+                  {storedBpm != null && (
+                    <span
+                      className={cn(
+                        "tabular-nums",
+                        storedHuman ? "" : "text-muted/70",
+                      )}
+                    >
+                      {storedBpm}
+                      {storedHuman ? "" : "?"}
+                    </span>
+                  )}
+                </button>
+              );
+            })()}
 
             {/* Snap chip — cycles loopBars AND resizes the loop region
                 to match (preserving BPM). Requires a region: bar
