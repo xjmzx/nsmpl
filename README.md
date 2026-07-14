@@ -1,4 +1,6 @@
-# smpl-tool
+<img src="docs/nsmpl-lockup.svg" alt="nsmpl" width="300">
+
+# nsmpl
 
 Local audio sample tool with Nostr publishing — companion to the
 [smpl.fizx.uk](https://smpl.fizx.uk) sample-sharing site.
