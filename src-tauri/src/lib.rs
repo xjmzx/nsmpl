@@ -1221,6 +1221,64 @@ fn resolve_source(path: String) -> SourceResolution {
     out
 }
 
+// ---- ndisc published-release manifest (read-only) --------------------------
+//
+// `~/.local/share/ndisc-suite/published.json`, exported by ndisc. nsmpl is
+// deliberately **read-only** with respect to it — and read-only about Nostr
+// publishing generally: it edits audio, it does not own publish state. Knowing
+// which releases ndisc has published is enough to scope the Library to the
+// published discography; recording what *this* app published is a different
+// problem (a lifecycle, not a boolean) and belongs where publish state already
+// lives.
+//
+// Returned as relpaths under the library root, because that is the shape the
+// clip tree mirrors: a clip folder `214/Fuel Cells` under `music_clips`
+// corresponds to the release `214/Fuel Cells` under `music`. Absolute paths
+// would force the frontend to know both roots.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestRelease {
+    dir: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishedManifest {
+    #[serde(default)]
+    releases: Vec<ManifestRelease>,
+}
+
+/// Relpaths (under the library root) of the releases ndisc has published.
+/// `Ok(None)` when no manifest has been exported — the ordinary cold state, not
+/// an error, and the UI simply doesn't offer the filter.
+#[tauri::command]
+fn released_rels() -> Result<Option<Vec<String>>, String> {
+    let home = std::env::var_os("HOME").ok_or("no HOME")?;
+    let p = PathBuf::from(home).join(".local/share/ndisc-suite/published.json");
+    let Ok(raw) = fs::read_to_string(&p) else {
+        return Ok(None);
+    };
+    let manifest: PublishedManifest =
+        serde_json::from_str(&raw).map_err(|e| format!("published.json: {e}"))?;
+
+    // Resolve each absolute release dir to (root, rel) with the same roots
+    // manifest the clip→source resolution uses, so the two can never disagree
+    // about where the library lives.
+    let mut out = Vec::with_capacity(manifest.releases.len());
+    for r in &manifest.releases {
+        let res = resolve_source(r.dir.clone());
+        if let Some(rel) = res.rel {
+            if !rel.is_empty() {
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(Some(out))
+}
+
 // ---- suite-shared BPM store -----------------------------------------------
 //
 // `~/.local/share/ndisc-suite/bpm.json`. Contract + rationale live in
@@ -1446,7 +1504,8 @@ pub fn run() {
             clear_identity,
             resolve_source,
             store_bars_bpm,
-            known_bpm
+            known_bpm,
+            released_rels
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

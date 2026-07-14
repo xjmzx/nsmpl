@@ -60,6 +60,17 @@ export async function resolveSource(path: string): Promise<SourceResolution> {
   return invoke<SourceResolution>("resolve_source", { path });
 }
 
+/// Relpaths (under the library root) of the releases ndisc has published to
+/// Nostr, read from the suite-shared manifest it exports. null = no manifest
+/// has been exported, which is the ordinary cold state rather than an error.
+///
+/// nsmpl is READ-ONLY about this, and about Nostr publish state generally: it
+/// edits audio, it does not own a publish lifecycle. Knowing what ndisc has
+/// released is enough to scope the Library to the published discography.
+export async function releasedRels(): Promise<string[] | null> {
+  return invoke<string[] | null>("released_rels");
+}
+
 /// The suite-shared BPM store (~/.local/share/ndisc-suite/bpm.json).
 /// Contract: nplay/schema/bpm-store-v1.md.
 ///

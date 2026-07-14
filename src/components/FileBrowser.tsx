@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Radio,
   Film,
   FolderInput,
   FolderOpen,
@@ -15,6 +16,7 @@ import { LeafIcon, LeafDots } from "./LeafIcon";
 import {
   listAudioFiles,
   listLeafFolders,
+  releasedRels,
   type AudioFile,
   type FolderEntry,
 } from "../lib/tauri";
@@ -157,6 +159,35 @@ export function FileBrowser({
   const [folderMode, setFolderMode] = useState(false);
   const [folders, setFolders] = useState<FolderEntry[]>([]);
   const [audioFilter, setAudioFilter] = useState<"all" | "has" | "none">("all");
+  // Releases ndisc has published (relpaths under the library root). null = no
+  // manifest exported — the filter is simply not offered, rather than offered
+  // and matching nothing.
+  const [released, setReleased] = useState<Set<string> | null>(null);
+  const [releasedFilter, setReleasedFilter] = useState(false);
+  useEffect(() => {
+    releasedRels()
+      .then((r) => setReleased(r ? new Set(r) : null))
+      .catch(() => setReleased(null));
+  }, []);
+
+  // The clip tree mirrors the source tree, so a clip folder's rel IS the
+  // release's rel — but walk UP as well, because a multi-disc release surfaces
+  // its CD folders as the leaves ("Artist/Release/Disc 1") while the manifest
+  // names the release ("Artist/Release").
+  const inReleased = useCallback(
+    (rel: string) => {
+      if (!released) return false;
+      let p = rel;
+      while (p) {
+        if (released.has(p)) return true;
+        const i = p.lastIndexOf("/");
+        if (i < 0) break;
+        p = p.slice(0, i);
+      }
+      return false;
+    },
+    [released],
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<Sort>(loadSort);
@@ -263,9 +294,10 @@ export function FileBrowser({
       if (q && !f.rel.toLowerCase().includes(q)) return false;
       if (audioFilter === "has" && f.audioCount === 0) return false;
       if (audioFilter === "none" && f.audioCount > 0) return false;
+      if (releasedFilter && !inReleased(f.rel)) return false;
       return true;
     });
-  }, [folders, query, audioFilter]);
+  }, [folders, query, audioFilter, releasedFilter, inReleased]);
 
   // Tally for the filter chips (over the search-filtered set).
   const folderTotals = useMemo(() => {
@@ -456,6 +488,32 @@ export function FileBrowser({
               </>
             );
           })()}
+
+          {/* ndisc-released scope. Only rendered when a manifest exists — a
+              control that silently matches nothing is worse than no control.
+              This is read-only awareness of ndisc's discography; nsmpl records
+              no publish state of its own. */}
+          {released && (
+            <button
+              type="button"
+              onClick={() => setReleasedFilter((v) => !v)}
+              aria-pressed={releasedFilter}
+              title={
+                releasedFilter
+                  ? `Showing only clips inside the ${released.size.toLocaleString()} releases ndisc has published to Nostr (kind:31237). Click to clear.`
+                  : `Show only clips inside the ${released.size.toLocaleString()} releases ndisc has published to Nostr (kind:31237).`
+              }
+              className={cn(
+                "ml-auto flex items-center gap-1 h-7 px-2 rounded-md transition-colors",
+                releasedFilter
+                  ? "bg-mauve/20 text-mauve"
+                  : "bg-surface text-muted hover:text-fg",
+              )}
+            >
+              <Radio size={12} />
+              released
+            </button>
+          )}
         </div>
       )}
 

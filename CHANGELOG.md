@@ -17,6 +17,33 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.3.0-beta.8 — unreleased
+
+### Awareness of ndisc's published discography (read-only)
+- **New `released` filter** in the Library's folder mode: narrows the clip tree to
+  the releases ndisc has published to Nostr (kind:31237) — 1,609 here, out of
+  2,455 clip folders on disk.
+- Reads ndisc's suite-shared manifest (`~/.local/share/ndisc-suite/published.json`)
+  rather than its database, so nsmpl never couples to that schema. No manifest,
+  no chip: a control that silently matches nothing is worse than no control.
+- **Resolved through `roots.json`**, not by slicing paths — the same roots
+  manifest that powers clip→source resolution, so the two can never disagree
+  about where the library lives. Returns **relpaths**, so the frontend never
+  needs to know about two roots. Membership **walks up** the path, because a
+  multi-disc release surfaces `Artist/Release/Disc 1` as the leaf while the
+  manifest names `Artist/Release`.
+
+### nsmpl is read-only about Nostr publish state — on purpose
+- nsmpl edits audio; it does not own a publish lifecycle. It publishes NIP-94
+  (kind:1063) but deliberately records **no** publish state, and will not grow
+  one: a boolean "I think I published this" at 12k-clip scale is exactly the
+  problem ndisc's four-state model (never/published/stale/retracted, judged by
+  event id against the relays) exists to solve. Knowing what ndisc has *released*
+  is enough to scope the Library.
+- The nsec stays in the keychain (dev/release service split intact) — write
+  paths remain open for later; this is a decision about *state ownership*, not
+  about capability.
+
 ## 0.3.0-beta.7 — unreleased
 
 ### BPM — the bar-derived tempo is finally persisted
