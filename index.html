@@ -5,6 +5,25 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ndisc.smpl</title>
+    <script>
+      // Theme applied BEFORE React renders. Doing it in a useEffect lands it
+      // AFTER the first paint, so every launch flashed the default theme first
+      // — and on a fresh install that flash was the user's first impression of
+      // the app.
+      //
+      // Monochrome is the default: no stored choice, an unrecognised one, or no
+      // localStorage at all (private mode, storage disabled) => mono. The one
+      // source of truth for that rule is loadTheme() in App.tsx; keep them in
+      // step.
+      try {
+        var t = localStorage.getItem("smpl-tool.theme");
+        if (t !== "fizx" && t !== "upleb") t = "mono";
+        if (t === "upleb") document.documentElement.classList.add("theme-upleb");
+        if (t === "mono") document.documentElement.classList.add("theme-mono");
+      } catch (e) {
+        document.documentElement.classList.add("theme-mono");
+      }
+    </script>
   </head>
 
   <body>

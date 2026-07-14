@@ -72,3 +72,31 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgb(var(--c-muted));
 }
+
+/* ── Monochrome ─────────────────────────────────────────────────────────────
+   Chrome goes greyscale; MEANING keeps its colour.
+
+   Only the greyscale tokens are declared here. Everything NOT redeclared —
+   ok / warn / alert / nostr / medium, and the genre + year palettes — keeps its
+   :root value automatically. That is the theme in one sentence: this block is a
+   list of what does NOT mean anything.
+
+   The brand tokens (accent / mauve / digital / auburn) were each doing two jobs.
+   Hue was never their only carrier — hierarchy also lives in indent, fill, icons
+   and labels — so it moves onto LUMINANCE: mauve (upper tier) sits brighter than
+   digital (lower tier), the order the hues implied. Where a token WAS the sole
+   carrier of a data distinction, it was split out first rather than greyed
+   (see --c-lossy / --c-nostr). */
+.theme-mono {
+  --c-bg: 10 10 11;
+  --c-panel: 16 16 18;
+  --c-surface: 28 28 31;
+  --c-surface-hover: 44 44 48;
+  --c-fg: 240 240 243;
+  --c-muted: 122 122 128;
+
+  --c-accent: 232 232 236;
+  --c-mauve: 198 198 204;
+  --c-digital: 152 152 159;
+  --c-auburn: 150 150 156;
+}
