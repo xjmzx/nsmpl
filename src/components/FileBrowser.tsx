@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Home,
   Radio,
   Film,
   FolderInput,
@@ -14,6 +15,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
 import { LeafIcon, LeafDots } from "./LeafIcon";
 import {
+  clipsRoot,
   listAudioFiles,
   listLeafFolders,
   releasedRels,
@@ -77,6 +79,48 @@ interface FileBrowserProps {
 
 const DIR_KEY = "smpl-tool.lib.dir";
 const SORT_KEY = "smpl-tool.lib.sort";
+const RECENT_KEY = "smpl-tool.lib.recent";
+
+/** How many of each we surface. Two is the ask, and it's the right number —
+ *  more and the strip competes with the list it exists to serve. */
+const RECENT_SHOWN = 2;
+/** Keep a few more than we show, so dipping into a third artist and back
+ *  doesn't evict the pair you were actually working between. */
+const RECENT_KEPT = 6;
+
+/** A directory the user has browsed, classified by its depth under the clips
+ *  root: one level down is an ARTIST, two or more is a RELEASE (a multi-disc
+ *  set surfaces `Artist/Release/Disc 1`, which is still the release you were
+ *  in). The root itself is neither — that's what Home is for. */
+type RecentKind = "artist" | "release";
+interface Recent {
+  path: string;
+  label: string;
+  kind: RecentKind;
+}
+
+function loadRecents(): Recent[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const arr = raw ? (JSON.parse(raw) as Recent[]) : [];
+    return Array.isArray(arr) ? arr.filter((r) => r?.path && r?.kind) : [];
+  } catch {
+    return [];
+  }
+}
+
+function classify(path: string, root: string | null): Recent | null {
+  if (!root) return null;
+  const r = root.replace(/\/+$/, "");
+  if (!path.startsWith(r + "/")) return null;
+  const parts = path.slice(r.length + 1).split("/").filter(Boolean);
+  if (parts.length === 0) return null; // the root itself — Home covers it
+  return {
+    path,
+    label: parts[parts.length - 1],
+    kind: parts.length === 1 ? "artist" : "release",
+  };
+}
 
 type SortKey = "name" | "size" | "modified";
 type SortDir = "asc" | "desc";
@@ -164,6 +208,14 @@ export function FileBrowser({
   // and matching nothing.
   const [released, setReleased] = useState<Set<string> | null>(null);
   const [releasedFilter, setReleasedFilter] = useState(false);
+  // Home = the clip tree's root, from the suite roots manifest (not hardcoded).
+  const [home, setHome] = useState<string | null>(null);
+  const [recents, setRecents] = useState<Recent[]>(loadRecents);
+  useEffect(() => {
+    clipsRoot()
+      .then(setHome)
+      .catch(() => setHome(null));
+  }, []);
   useEffect(() => {
     releasedRels()
       .then((r) => setReleased(r ? new Set(r) : null))
@@ -199,6 +251,11 @@ export function FileBrowser({
   onListingRef.current = onListing;
   const onDirRef = useRef(onDir);
   onDirRef.current = onDir;
+  // loadDir is a plain function re-created each render, but it can be called
+  // from effects that closed over an older one — read `home` through a ref so a
+  // listing never classifies against a stale root.
+  const homeRef = useRef(home);
+  homeRef.current = home;
 
   async function loadDir(path: string) {
     if (!path) return;
@@ -218,6 +275,19 @@ export function FileBrowser({
       setFolderMode(folderList.length > 0);
       setDir(path);
       localStorage.setItem(DIR_KEY, path);
+      // Remember where we've been. Newest first, deduped by path — so
+      // re-entering a folder promotes it rather than duplicating it.
+      const rec = classify(path, homeRef.current);
+      if (rec) {
+        setRecents((prev) => {
+          const next = [rec, ...prev.filter((r) => r.path !== rec.path)].slice(
+            0,
+            RECENT_KEPT,
+          );
+          localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+          return next;
+        });
+      }
       onListingRef.current?.(items);
       onDirRef.current?.(path);
     } catch (e) {
@@ -361,6 +431,24 @@ export function FileBrowser({
           spellCheck={false}
         />
         <button
+          onClick={() => home && loadDir(home)}
+          disabled={loading || !home || dir === home}
+          className={cn(
+            "rounded-md bg-surface hover:bg-surfaceHover",
+            "text-fg disabled:opacity-50 disabled:cursor-not-allowed",
+            "flex items-center",
+            D.control,
+          )}
+          title={
+            home
+              ? `Home — the clip tree root (${home})`
+              : "No clips root in the suite roots manifest"
+          }
+          aria-label="Home — clip tree root"
+        >
+          <Home size={14} />
+        </button>
+        <button
           onClick={goUp}
           disabled={loading || !dir}
           className={cn(
@@ -444,6 +532,57 @@ export function FileBrowser({
         )}
       </div>
 
+      {/* Where you've been. Two artists and two releases — enough to pivot
+          between the pair you're actually working across, without the strip
+          competing with the list it exists to serve. Artists are digital-tinted
+          (the Library's own colour), releases accent. */}
+      {(() => {
+        const artists = recents
+          .filter((r) => r.kind === "artist")
+          .slice(0, RECENT_SHOWN);
+        const releases = recents
+          .filter((r) => r.kind === "release")
+          .slice(0, RECENT_SHOWN);
+        if (!artists.length && !releases.length) return null;
+        const chip = (r: Recent, tone: string) => (
+          <button
+            key={r.path}
+            onClick={() => loadDir(r.path)}
+            disabled={loading || dir === r.path}
+            title={r.path}
+            className={cn(
+              "px-1.5 py-0.5 rounded max-w-[10rem] truncate transition-colors",
+              "disabled:opacity-40 disabled:cursor-default",
+              tone,
+            )}
+          >
+            {r.label}
+          </button>
+        );
+        return (
+          <div className="flex items-center gap-1.5 text-[10px] font-mono flex-wrap">
+            {artists.length > 0 && (
+              <>
+                <span className="text-muted/70 uppercase tracking-wide">artists</span>
+                {artists.map((r) =>
+                  chip(r, "bg-digital/15 text-digital hover:bg-digital/25"),
+                )}
+              </>
+            )}
+            {releases.length > 0 && (
+              <>
+                <span className="text-muted/70 uppercase tracking-wide ml-1">
+                  releases
+                </span>
+                {releases.map((r) =>
+                  chip(r, "bg-accent/15 text-accent hover:bg-accent/25"),
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Folder-mode audio filter — a single cycling leaf toggle, the same
           control ndisc.tree uses: off → has audio (green) → no audio /
           sampling gaps (purple) → off. */}
@@ -517,12 +656,11 @@ export function FileBrowser({
         </div>
       )}
 
-      {/* flex-1 lets this block fill the section's elastic children
-          area when the column has spare height. min-h floor keeps it
-          from collapsing below a few rows; max-h caps it at ~10
-          visible rows (header + rows), beyond which the file list
-          inside scrolls. */}
-      <div className="mt-1 rounded-md bg-bg/50 overflow-hidden flex flex-col flex-1 min-h-[10rem] max-h-[20rem]">
+      {/* Fills the section's elastic children area. The old max-h-[20rem]
+          capped the list at ~10 rows no matter how much height was available —
+          which is exactly what made browsing a 2,455-folder clip tree painful.
+          It now grows to the section, and the list scrolls inside. */}
+      <div className="mt-1 rounded-md bg-bg/50 overflow-hidden flex flex-col flex-1 min-h-[10rem]">
         <div
           className={cn(
             folderMode ? FOLDER_GRID_CLS : GRID_CLS,

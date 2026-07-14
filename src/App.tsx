@@ -699,8 +699,12 @@ export default function App() {
           + Publish flank it at equal (tightened) width. items-stretch makes the
           expanded flanks match Library's height; a content-collapsed panel
           opts out with self-start so it stays short. */}
+      {/* flex-1 min-h-0: the bottom row absorbs whatever height the tracks
+          above don't use, so Sample / Library / Publish fill the viewport
+          instead of sitting at their content height. min-h-0 is what lets the
+          Library's list scroll INSIDE the row rather than growing the page. */}
       <div
-        className={`grid grid-cols-1 gap-4 items-stretch ${bottomCols}`}
+        className={`grid grid-cols-1 gap-4 items-stretch flex-1 min-h-0 ${bottomCols}`}
       >
         <InfoPanel
           file={focusedFile}

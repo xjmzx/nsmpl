@@ -219,3 +219,11 @@ export async function renderMix(
 ): Promise<string> {
   return invoke<string>("render_mix", { inputA, inputB });
 }
+
+/// The clip tree's root — the roots-manifest entry that MIRRORS another (i.e.
+/// the derived one: `music_clips mirrorOf music`). Read from the manifest, not
+/// hardcoded, so "home" in the Library means whatever the suite's roots say.
+/// null when there is no manifest or no mirror root.
+export async function clipsRoot(): Promise<string | null> {
+  return invoke<string | null>("clips_root");
+}

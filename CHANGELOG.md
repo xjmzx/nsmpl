@@ -17,6 +17,26 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.3.0-beta.9 — unreleased
+
+### Library — fills the screen, and can be navigated
+- **The main view now uses the height it has.** Collapsing the Sample and Publish
+  flanks gave the Library width but never height, because two things fought it:
+  the bottom row had no `flex-1` (so it sat at content height), and — the real
+  culprit — the Library's list carried **`max-h-[20rem]`, capping it at ~10 rows
+  no matter how much room was available**. Both gone. Collapse the flanks and the
+  Library takes the full viewport in both dimensions; the list scrolls inside it.
+- **Home button** → the clip tree's root. Read from the suite **roots manifest**
+  (the entry that `mirrorOf`s another), *not hardcoded to `/data/music_clips`* —
+  so "home" means whatever the roots say, and cannot drift out of step with
+  `resolve_source`. New `clips_root` command.
+- **Recents strip: two artists, two releases**, classified by depth under that
+  root — one level down is an artist, two or more is a release (a multi-disc set
+  surfaces `Artist/Release/Disc 1`, which is still the release you were in).
+  Newest first, deduped by path, so re-entering a folder promotes it rather than
+  duplicating it. Six are kept but two shown, so dipping into a third artist and
+  back doesn't evict the pair you're working between. Persisted.
+
 ## 0.3.0-beta.8 — unreleased
 
 ### Awareness of ndisc's published discography (read-only)

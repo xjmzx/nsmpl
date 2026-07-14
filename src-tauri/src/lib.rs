@@ -1249,6 +1249,22 @@ struct PublishedManifest {
     releases: Vec<ManifestRelease>,
 }
 
+/// The clip tree's root — the roots-manifest entry that MIRRORS another (i.e.
+/// the derived one: `music_clips mirrorOf music`). Read from the manifest
+/// rather than hardcoded, so "home" in the Library means whatever the suite's
+/// roots say it means. `Ok(None)` when there is no manifest or no mirror root.
+#[tauri::command]
+fn clips_root() -> Result<Option<String>, String> {
+    let Some(manifest) = load_roots_manifest() else {
+        return Ok(None);
+    };
+    Ok(manifest
+        .roots
+        .values()
+        .find(|e| e.mirror_of.is_some())
+        .and_then(|e| e.paths.first().cloned()))
+}
+
 /// Relpaths (under the library root) of the releases ndisc has published.
 /// `Ok(None)` when no manifest has been exported — the ordinary cold state, not
 /// an error, and the UI simply doesn't offer the filter.
@@ -1505,7 +1521,8 @@ pub fn run() {
             resolve_source,
             store_bars_bpm,
             known_bpm,
-            released_rels
+            released_rels,
+            clips_root
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
