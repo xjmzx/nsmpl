@@ -58,6 +58,9 @@ install: $(TAURI_BIN)
 	@if command -v update-desktop-database >/dev/null 2>&1; then \
 		update-desktop-database $(APPDIR) >/dev/null 2>&1 || true; \
 	fi
+	@if command -v gtk-update-icon-cache >/dev/null 2>&1; then \
+		gtk-update-icon-cache -f -t $(PREFIX)/share/icons/hicolor >/dev/null 2>&1 || true; \
+	fi
 	@echo "installed to $(PREFIX)"
 	@echo "  binary  -> $(BINDIR)/smpl-tool"
 	@echo "  desktop -> $(DESKTOP_OUT)"
@@ -68,6 +71,9 @@ uninstall:
 	rm -f $(DESKTOP_OUT)
 	@if command -v update-desktop-database >/dev/null 2>&1; then \
 		update-desktop-database $(APPDIR) >/dev/null 2>&1 || true; \
+	fi
+	@if command -v gtk-update-icon-cache >/dev/null 2>&1; then \
+		gtk-update-icon-cache -f -t $(PREFIX)/share/icons/hicolor >/dev/null 2>&1 || true; \
 	fi
 	@echo "uninstalled from $(PREFIX)"
 
