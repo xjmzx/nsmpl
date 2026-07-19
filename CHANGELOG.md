@@ -19,6 +19,20 @@ below. Where it does share a contract with the suite, that is named in the entry
 
 ## 0.4.0-beta.1 — unreleased
 
+### Clip-coverage bars in the Library
+- Browsing a release folder now shows a **clip-coverage bar** on each clip: the
+  clip's **own probed length** as a fraction of its resolved source track, on a
+  perceptual (sqrt) scale matching ntree. The file-list header carries a
+  duration-weighted folder **rollup**.
+- Durations come from a new `folder_coverage` command — header-only `ffprobe`
+  on each clip plus its `resolve_source` original — run **live on folder-open**
+  (no scan; nsmpl has none). Cached per folder for the session, so revisits are
+  free.
+- Because it probes each clip's *actual* length, it already handles the planned
+  variable-length clips (5–60 s) — no constant assumed. A clip whose source
+  doesn't resolve shows an empty bar with a "source not resolved" tooltip (a
+  drift signal).
+
 ### Monochrome theme — and it is now the default
 
 - **New `mono` theme**, and the title now cycles **fizx → upleb → mono**.

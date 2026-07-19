@@ -11,21 +11,48 @@ through Rust commands. Choice rationale: web tech matches the
 `smpl.fizx.uk` site so Nostr/audio code is reusable, while Tauri ships
 the result as a real Linux desktop app that fits the rest of the suite.
 
-> **Status: scaffold.** Layout, panels and a working
-> `list_audio_files` Rust command are in place. Playback, edits, Nostr
-> publishing buttons are wired into the UI but stubbed.
+## Features
 
-## Planned features
+- **Browse** a local samples folder — type a path and see every audio
+  file in it, or drill a folder tree (`list_audio_files` /
+  `list_audio_files_deep` / `list_leaf_folders`).
+- **Two-deck playback** — two WaveSurfer players plus a master strip with
+  a shared play/pause, transport, cue and click-to-seek.
+- **Loop regions** — drag-select an in/out region per deck; playback wraps
+  the loop.
+- **Edits** (ffmpeg via Rust) — trim, prune, fade in/out, gain, and pad
+  start/end. A **two-track mix bounce** (`render_mix`) renders the decks
+  to a single WAV.
+- **BPM** — aubio auto-detect (`detect_bpm`) plus a manual bars-based
+  calculator, written to the suite-shared `bpm.json` store (reused by
+  `bpm-tapper` / `nplay`).
+- **Suite integration** — resolves a clip back to its source release via
+  `~/.config/ndisc-suite/roots.json` (`resolve_source`), and scopes to the
+  releases `ndisc` has published (`released_rels`, `clips_root`).
+- **Clip-coverage bars** — browsing a clip folder shows each clip's length as a
+  fraction of its resolved source track (probed live on open via
+  `folder_coverage`), with a folder rollup. Matches ntree's Library bar and
+  handles variable clip lengths natively.
+- **Nostr identity** — generate / import / forget an `nsec`, held in the
+  OS keyring (never in localStorage).
+- **Publish a sample to Nostr** — NIP-96 HTTP upload (default
+  `nostr.build`) with NIP-98 auth, then a NIP-94 **kind:1063**
+  file-metadata event over a relay, so it surfaces on
+  [`smpl.fizx.uk`](https://smpl.fizx.uk) rather than reimplementing the
+  reader.
 
-- Browse a local samples folder (already wired: enter a path, see all
-  audio files in it).
-- Playback with transport controls and seek.
-- Loop region selection (set in/out, loop region).
-- Edits: trim, fade in/out, normalize, format conversion (Web Audio
-  API for in-app preview, ffmpeg via Rust for export).
-- Publish a sample to Nostr (NIP-94 file metadata + GRASP/NIP-34 blob
-  upload) so it surfaces on `smpl.fizx.uk`.
-- Pair with the reader site rather than reimplement it.
+## Still to come
+
+- A dedicated **normalize** edit and general **format conversion** on
+  export (the bounce currently renders WAV PCM only).
+- **Reading** the shared feed (`feed.v1`, kind:31239) and reacting to
+  other users' samples — today the app only publishes; there is no
+  inbound-feed UI yet (`lib/rating.ts` exists but nothing consumes a
+  feed).
+- **Whole-tree coverage at a glance** — coverage bars are currently probed
+  per open folder. A suite-shared duration index written by `ntree` (the
+  scanner) would let the release list show rollups without opening each folder;
+  deferred as the heavier, coordinated option.
 
 ## Install dependencies (Debian / Ubuntu)
 

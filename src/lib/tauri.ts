@@ -60,6 +60,20 @@ export async function resolveSource(path: string): Promise<SourceResolution> {
   return invoke<SourceResolution>("resolve_source", { path });
 }
 
+/// Per-clip duration coverage for a folder: each clip's own probed length and
+/// its resolved source-track length (both null when unprobeable / unresolved).
+/// Cheap header-only ffprobe, run live on folder-open — powers the clip-coverage
+/// bars without a scan.
+export interface ClipCoverage {
+  path: string;
+  clipSecs: number | null;
+  sourceSecs: number | null;
+}
+
+export async function folderCoverage(dir: string): Promise<ClipCoverage[]> {
+  return invoke<ClipCoverage[]>("folder_coverage", { dir });
+}
+
 /// Relpaths (under the library root) of the releases ndisc has published to
 /// Nostr, read from the suite-shared manifest it exports. null = no manifest
 /// has been exported, which is the ordinary cold state rather than an error.

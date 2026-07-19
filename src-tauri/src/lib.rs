@@ -1221,6 +1221,48 @@ fn resolve_source(path: String) -> SourceResolution {
     out
 }
 
+/// Per-clip duration coverage for a browsed folder: the clip's own probed
+/// length and its resolved source track's length. `ffprobe format=duration` is
+/// a header read (no decode), so this runs live on folder-open — no scan, which
+/// is why nsmpl can match ntree's coverage bar without ntree's rescan. Both
+/// fields are optional: a clip we can't probe, or whose source doesn't resolve
+/// (drift / not under a mirror root), simply renders no bar.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipCoverage {
+    path: String,
+    clip_secs: Option<f64>,
+    source_secs: Option<f64>,
+}
+
+#[tauri::command]
+fn folder_coverage(dir: String) -> Result<Vec<ClipCoverage>, String> {
+    let files = list_audio_files(dir)?;
+    let mut out = Vec::with_capacity(files.len());
+    for f in files {
+        if f.is_video {
+            out.push(ClipCoverage {
+                path: f.path,
+                clip_secs: None,
+                source_secs: None,
+            });
+            continue;
+        }
+        let clip_secs = probe_duration(&f.path).ok();
+        let res = resolve_source(f.path.clone());
+        let source_secs = match (res.source_exists, res.source_path) {
+            (true, Some(sp)) => probe_duration(&sp).ok(),
+            _ => None,
+        };
+        out.push(ClipCoverage {
+            path: f.path,
+            clip_secs,
+            source_secs,
+        });
+    }
+    Ok(out)
+}
+
 // ---- ndisc published-release manifest (read-only) --------------------------
 //
 // `~/.local/share/ndisc-suite/published.json`, exported by ndisc. nsmpl is
@@ -1522,7 +1564,8 @@ pub fn run() {
             store_bars_bpm,
             known_bpm,
             released_rels,
-            clips_root
+            clips_root,
+            folder_coverage
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

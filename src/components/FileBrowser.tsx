@@ -16,13 +16,16 @@ import { Section } from "./Section";
 import { LeafIcon, LeafDots } from "./LeafIcon";
 import {
   clipsRoot,
+  folderCoverage,
   listAudioFiles,
   listLeafFolders,
   releasedRels,
   type AudioFile,
+  type ClipCoverage,
   type FolderEntry,
 } from "../lib/tauri";
 import { cn } from "../lib/cn";
+import { ClipBar, CoverageBar } from "./CoverageBar";
 
 type Density = "super-slim" | "slim" | "wide";
 
@@ -168,7 +171,7 @@ function fmtModified(unixSec: number): string {
 
 // Three-column grid shared by header + rows so the headers line up with
 // their values.
-const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem] gap-3 items-center";
+const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem_5rem] gap-3 items-center";
 // Folder-mode grid: artist | release | leaf meter. The leaf meter doubles as
 // the audio-presence cue — lit (green) leaves when the release holds audio,
 // all-dim when it's a sampling gap — so no separate dot column is needed.
@@ -210,6 +213,12 @@ export function FileBrowser({
   const [releasedFilter, setReleasedFilter] = useState(false);
   // Home = the clip tree's root, from the suite roots manifest (not hardcoded).
   const [home, setHome] = useState<string | null>(null);
+  // Per-clip coverage for the OPEN folder — clip length ÷ resolved source
+  // length, probed live on folder-open (header-only ffprobe, no scan). Keyed by
+  // clip path; cached per folder so revisits are free.
+  const [coverage, setCoverage] = useState<Map<string, ClipCoverage>>(new Map());
+  const coverageCache = useRef<Map<string, ClipCoverage[]>>(new Map());
+  const coverageDirRef = useRef("");
   const [recents, setRecents] = useState<Recent[]>(loadRecents);
   useEffect(() => {
     clipsRoot()
@@ -273,6 +282,29 @@ export function FileBrowser({
       setFiles(items);
       setFolders(folderList);
       setFolderMode(folderList.length > 0);
+      // Coverage bars for the open folder — probe clip + source durations live.
+      // Fire-and-forget so the listing shows immediately; bars fill in when the
+      // header-only ffprobe returns. Guard so a stale folder can't overwrite a
+      // newer one that resolved first.
+      coverageDirRef.current = path;
+      if (items.length > 0) {
+        const cached = coverageCache.current.get(path);
+        if (cached) {
+          setCoverage(new Map(cached.map((c) => [c.path, c])));
+        } else {
+          setCoverage(new Map());
+          folderCoverage(path)
+            .then((rows) => {
+              coverageCache.current.set(path, rows);
+              if (coverageDirRef.current === path) {
+                setCoverage(new Map(rows.map((c) => [c.path, c])));
+              }
+            })
+            .catch(() => {});
+        }
+      } else {
+        setCoverage(new Map());
+      }
       setDir(path);
       localStorage.setItem(DIR_KEY, path);
       // Remember where we've been. Newest first, deduped by path — so
@@ -295,6 +327,7 @@ export function FileBrowser({
       setFiles([]);
       setFolders([]);
       setFolderMode(false);
+      setCoverage(new Map());
     } finally {
       setLoading(false);
     }
@@ -698,6 +731,12 @@ export function FileBrowser({
                 onToggle={toggleSort}
                 align="right"
               />
+              <span
+                className="flex items-center"
+                title="clip coverage of this folder"
+              >
+                <CoverageBar rows={[...coverage.values()]} />
+              </span>
             </>
           )}
         </div>
@@ -795,6 +834,7 @@ export function FileBrowser({
                   <span className="text-muted text-right shrink-0">
                     {fmtModified(f.modified)}
                   </span>
+                  <ClipBar cov={coverage.get(f.path)} />
                 </li>
               ))}
             </>

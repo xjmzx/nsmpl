@@ -18,7 +18,8 @@ to `ntree`, sharing its leaf/foliage vocabulary.
   flanks).
 - **Leaf/foliage** vocabulary in the Library — a cycling leaf filter and stacked
   green leaf-dot clusters marking clips/provenance.
-- **Publishes** sample metadata to Nostr (NIP-94) and supports reactions.
+- **Publishes** sample metadata to Nostr (NIP-94, kind:1063). *(Reading a
+  feed and reacting are not wired yet — publish only.)*
 
 ## Tech stack & build
 Tauri 2 · React + Vite + TypeScript · Rust backend · filesystem-oriented (no
@@ -31,11 +32,13 @@ SQLite) · OS keyring for the signing key · `nostr` / `nostr-tools`.
   its source release is a near-term provenance goal.
 - Shares the **leaf/foliage** UI language with `ntree` (leaves = clips /
   provenance) and the wider palette + collapse-flanks layout.
-- Reads the shared **feed**; reactions use the common `lib/rating.ts`.
+- *Planned:* read the shared **feed** and react via the common
+  `lib/rating.ts` — today the app only publishes, with no inbound-feed UI.
 
 ## Nostr surface
-Publishes **NIP-94 file metadata (kind 1063)** for samples and **reactions
-(kind 7)**; reads `feed.v1` (31239). Signs with a local `nsec` in the OS keyring.
+Publishes **NIP-94 file metadata (kind 1063)** for samples. Signs with a
+local `nsec` in the OS keyring. *(Inbound feed + kind:7 reactions are
+scaffolded in `lib` but not yet wired to a feed.)*
 
 ## Styling notes
 Shared design language, tuned to a very slim density. Per-panel border tints
