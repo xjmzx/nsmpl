@@ -1112,9 +1112,40 @@ struct SourceResolution {
     source_exists: bool,
 }
 
+
+/// The suite's shared directory — deliberately OUTSIDE each app's private data
+/// dir, because the whole point is that the other suite apps can read it. Every
+/// app must resolve this identically. Linux unchanged (installs depend on it);
+/// macOS shares it (nothing there uses it yet, so nothing to migrate). Windows
+/// uses LOCALAPPDATA not APPDATA on purpose: everything here is MACHINE-specific
+/// (roots.json points at local library paths), so it must not roam.
+fn suite_shared_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("ndisc-suite"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share/ndisc-suite"))
+    }
+}
+
+/// Config counterpart of `suite_shared_dir`. On unix the XDG split puts
+/// roots.json under ~/.config; Windows has no such split, so both collapse to
+/// the same per-machine directory.
+fn suite_config_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA").map(|b| PathBuf::from(b).join("ndisc-suite"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/ndisc-suite"))
+    }
+}
+
 fn load_roots_manifest() -> Option<RootsManifest> {
-    let home = std::env::var_os("HOME")?;
-    let p = PathBuf::from(home).join(".config/ndisc-suite/roots.json");
+    let p = suite_config_dir()?.join("roots.json");
     let raw = fs::read_to_string(p).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -1312,8 +1343,9 @@ fn clips_root() -> Result<Option<String>, String> {
 /// an error, and the UI simply doesn't offer the filter.
 #[tauri::command]
 fn released_rels() -> Result<Option<Vec<String>>, String> {
-    let home = std::env::var_os("HOME").ok_or("no HOME")?;
-    let p = PathBuf::from(home).join(".local/share/ndisc-suite/published.json");
+    let p = suite_shared_dir()
+        .ok_or("no home directory")?
+        .join("published.json");
     let Ok(raw) = fs::read_to_string(&p) else {
         return Ok(None);
     };
@@ -1395,8 +1427,7 @@ fn bpm_may_overwrite(existing: &str, incoming: &str) -> bool {
 }
 
 fn bpm_store_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".local/share/ndisc-suite/bpm.json"))
+    Some(suite_shared_dir()?.join("bpm.json"))
 }
 
 fn load_bpm_store() -> BpmStore {
