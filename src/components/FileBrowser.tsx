@@ -15,12 +15,13 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
-import { LeafIcon, LeafDots } from "./LeafIcon";
+import { LeafIcon, LeafDots, CountBadge } from "./LeafIcon";
 import {
   clipsRoot,
   folderCoverage,
   listAudioFiles,
   listLeafFolders,
+  pathExists,
   releasedRels,
   type AudioFile,
   type ClipCoverage,
@@ -409,6 +410,30 @@ export function FileBrowser({
     loadDir(picked);
   }
 
+  // The three roots, in a fixed order for prefix-matching the current dir.
+  const rootBases = () =>
+    [sourceRoot, home ?? DEFAULT_CLIPS_ROOT, webRoot].filter(Boolean) as string[];
+
+  // Is `dir` inside this root's tree? (`+ "/"` guards the music / music_clips /
+  // music_clips_comp prefix overlap.) Drives the active-view highlight.
+  const underRoot = (root: string | null) =>
+    !!root && (dir === root || dir.startsWith(root + "/"));
+
+  // Switch to `target` root but KEEP the current sub-path relative to whichever
+  // root we're in — /data/music/214/Fuel Cells → 214/Fuel Cells under the target
+  // tree. Falls back to the target root when that mirrored folder doesn't exist
+  // yet (e.g. an album not sampled/compressed).
+  async function switchRoot(target: string) {
+    if (!target) return;
+    const base = rootBases().find((b) => dir === b || dir.startsWith(b + "/"));
+    const rel = base ? dir.slice(base.length).replace(/^\/+/, "") : "";
+    const candidate = rel ? `${target}/${rel}` : target;
+    const dest = (await pathExists(candidate).catch(() => false))
+      ? candidate
+      : target;
+    loadDir(dest);
+  }
+
   function toggleSort(key: SortKey) {
     setSort((s) =>
       s.key === key
@@ -531,35 +556,35 @@ export function FileBrowser({
             is inverted so the current tree reads at a glance. */}
         <div className="flex gap-0.5">
           <button
-            onClick={(e) => (e.shiftKey ? pickRoot("source") : loadDir(sourceRoot))}
+            onClick={(e) => (e.shiftKey ? pickRoot("source") : switchRoot(sourceRoot))}
             disabled={loading || !sourceRoot}
             className={cn(
               "rounded-md flex items-center",
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              dir === sourceRoot
+              underRoot(sourceRoot)
                 ? "bg-accent text-bg"
                 : "bg-surface hover:bg-surfaceHover text-fg",
               D.control,
             )}
-            title={`Source library (${sourceRoot}) — click to go · shift-click to set`}
+            title={`Source library (${sourceRoot}) — keeps sub-path · shift-click to set`}
             aria-label="Source library root"
           >
             <Music size={14} />
           </button>
           <button
-            onClick={() => home && loadDir(home)}
+            onClick={() => home && switchRoot(home)}
             disabled={loading || !home}
             className={cn(
               "rounded-md flex items-center",
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              dir === home
+              underRoot(home)
                 ? "bg-accent text-bg"
                 : "bg-surface hover:bg-surfaceHover text-fg",
               D.control,
             )}
             title={
               home
-                ? `Clips — the FLAC clip tree root (${home})`
+                ? `Clips — the FLAC clip tree root (${home}) — keeps sub-path`
                 : "No clips root in the suite roots manifest"
             }
             aria-label="Clips — clip tree root"
@@ -567,17 +592,17 @@ export function FileBrowser({
             <Home size={14} />
           </button>
           <button
-            onClick={(e) => (e.shiftKey ? pickRoot("web") : loadDir(webRoot))}
+            onClick={(e) => (e.shiftKey ? pickRoot("web") : switchRoot(webRoot))}
             disabled={loading || !webRoot}
             className={cn(
               "rounded-md flex items-center",
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              dir === webRoot
+              underRoot(webRoot)
                 ? "bg-accent text-bg"
                 : "bg-surface hover:bg-surfaceHover text-fg",
               D.control,
             )}
-            title={`Web (Opus) clips (${webRoot}) — click to go · shift-click to set`}
+            title={`Web (Opus) clips (${webRoot}) — keeps sub-path · shift-click to set`}
             aria-label="Web/Opus clips root"
           >
             <Globe size={14} />
@@ -878,6 +903,18 @@ export function FileBrowser({
                         maxCols={8}
                         maxRows={4}
                       />
+                      {/* Disc count — a numbered circle for multi-disc releases
+                          (CD1/CD2/… collapsed), matching ndisc: circle = disc
+                          count, distinct from the per-file dots. Single-disc
+                          releases stay unmarked. */}
+                      {fld.discCount > 1 && (
+                        <CountBadge
+                          value={fld.discCount}
+                          title={`${fld.discCount} discs`}
+                          shapeClassName="rounded-full"
+                          colorClassName="bg-medium text-bg"
+                        />
+                      )}
                     </span>
                   </li>
                 );

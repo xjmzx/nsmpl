@@ -185,6 +185,24 @@ struct FolderEntry {
     /// Count of video files directly inside this leaf folder — lets the UI
     /// mark releases that carry audio-visual content.
     video_count: usize,
+    /// Number of discs. 1 for a normal leaf; >1 when this row is a multi-disc
+    /// release collapsed from its CD1/CD2/… subfolders (see collect_leaf_folders).
+    disc_count: usize,
+}
+
+/// Is this a disc subfolder name — "CD1", "CD 2", "Disc 3", "Disk1", …? Used to
+/// recognise (and collapse) multi-disc release layouts.
+fn is_disc_dir_name(name: &str) -> bool {
+    let n = name.trim().to_ascii_lowercase();
+    for prefix in ["cd", "disc", "disk"] {
+        if let Some(rest) = n.strip_prefix(prefix) {
+            let rest = rest.trim_start_matches([' ', '-', '_', '.']);
+            if matches!(rest.chars().next(), Some(c) if c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Walk to the *leaf* folders under `dir` (those with no child directories —
@@ -224,9 +242,51 @@ fn collect_leaf_folders(dir: &Path, base: &Path, out: &mut Vec<FolderEntry>) {
             path: dir.to_string_lossy().into_owned(),
             audio_count,
             video_count,
+            disc_count: 1,
         });
     } else {
         subdirs.sort();
+        // Multi-disc release: when EVERY subdir is a "CD1 / Disc 2 / …" folder,
+        // collapse them into one release row carrying the disc count + summed
+        // audio, so the listing matches ndisc (track dots + a disc-count circle)
+        // instead of a row per disc. Only collapses in the PARENT listing — the
+        // non-empty-rel guard means drilling INTO the release still lists its
+        // individual discs, so per-disc sampling is preserved.
+        let all_discs = subdirs.iter().all(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(is_disc_dir_name)
+                .unwrap_or(false)
+        });
+        if all_discs {
+            if let Ok(rel) = dir.strip_prefix(base) {
+                if !rel.as_os_str().is_empty() {
+                    let (mut audio_count, mut video_count) = (0usize, 0usize);
+                    for sub in &subdirs {
+                        if let Ok(rd) = fs::read_dir(sub) {
+                            for e in rd.flatten() {
+                                let p = e.path();
+                                if p.is_file() {
+                                    if is_audio_ext(&p) {
+                                        audio_count += 1;
+                                    } else if is_video_ext(&p) {
+                                        video_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    out.push(FolderEntry {
+                        rel: rel.to_string_lossy().into_owned(),
+                        path: dir.to_string_lossy().into_owned(),
+                        audio_count,
+                        video_count,
+                        disc_count: subdirs.len(),
+                    });
+                    return;
+                }
+            }
+        }
         for s in subdirs {
             collect_leaf_folders(&s, base, out);
         }
@@ -246,6 +306,13 @@ fn list_leaf_folders(dir: String) -> Result<Vec<FolderEntry>, String> {
     collect_leaf_folders(base, base, &mut out);
     out.sort_by(|a, b| a.rel.to_lowercase().cmp(&b.rel.to_lowercase()));
     Ok(out)
+}
+
+/// Does a path exist on disk? Used by the publisher to offer the Opus web copy
+/// of a FLAC clip only when it has actually been compressed.
+#[tauri::command]
+fn path_exists(path: String) -> bool {
+    Path::new(&path).exists()
 }
 
 /// Read a file as raw bytes. Returns a `Response` so Tauri IPC ships it
@@ -1578,6 +1645,7 @@ pub fn run() {
             list_audio_files,
             list_audio_files_deep,
             list_leaf_folders,
+            path_exists,
             read_audio_file,
             trim_audio,
             prune_audio,

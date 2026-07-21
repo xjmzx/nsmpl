@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Section } from "./Section";
 import { CollapsedStrip } from "./CollapsedStrip";
-import { readAudioFile, type AudioFile } from "../lib/tauri";
+import { clipsRoot, pathExists, readAudioFile, type AudioFile } from "../lib/tauri";
 import {
   DEFAULT_NIP96_ENDPOINT,
   generateIdentity,
@@ -61,6 +61,12 @@ const MIME_BY_EXT: Record<string, string> = {
   aiff: "audio/aiff",
   wv: "audio/x-wavpack",
 };
+
+// The Compress step (ntree) writes Opus web copies here, mirroring the clips
+// tree. Keys match FileBrowser's persisted per-app roots.
+const WEB_ROOT_KEY = "smpl-tool.root.web";
+const DEFAULT_WEB_ROOT = "/data/music_clips_comp";
+const DEFAULT_CLIPS_ROOT = "/data/music_clips";
 
 function mimeFor(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -134,12 +140,69 @@ export function NostrPanel({
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [copied, setCopied] = useState<string | null>(null);
 
+  // Publish format — the FLAC clip vs its Opus web copy. flacPath/opusPath are
+  // the on-disk counterparts (null when absent); format is the current choice.
+  const [format, setFormat] = useState<"flac" | "opus">("flac");
+  const [flacPath, setFlacPath] = useState<string | null>(null);
+  const [opusPath, setOpusPath] = useState<string | null>(null);
+
   // Default the title to the filename stem when a sample is selected.
   useEffect(() => {
     if (!file) return;
     const stem = file.name.replace(/\.[^.]+$/, "");
     setTitle((prev) => (prev.trim() ? prev : stem));
   }, [file?.path]);
+
+  // Resolve the FLAC + Opus counterparts of the selected clip so the publisher
+  // can offer a choice. `rel` is taken relative to whichever tree the file lives
+  // in (clips or web); the sibling is the same `rel` under the other root.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setFlacPath(null);
+      setOpusPath(null);
+      setFormat("flac");
+      if (!file) return;
+      const isFlac = /\.flac$/i.test(file.path);
+      const isOpus = /\.opus$/i.test(file.path);
+      if (!isFlac && !isOpus) return; // only FLAC clips / Opus copies pair up
+      const cr = (await clipsRoot().catch(() => null)) ?? DEFAULT_CLIPS_ROOT;
+      const wr = localStorage.getItem(WEB_ROOT_KEY) ?? DEFAULT_WEB_ROOT;
+      let rel: string | null = null;
+      if (file.path.startsWith(cr + "/")) rel = file.path.slice(cr.length + 1);
+      else if (file.path.startsWith(wr + "/")) rel = file.path.slice(wr.length + 1);
+      const flacCand = isFlac
+        ? file.path
+        : rel
+          ? `${cr}/${rel.replace(/\.opus$/i, ".flac")}`
+          : null;
+      const opusCand = isOpus
+        ? file.path
+        : rel
+          ? `${wr}/${rel.replace(/\.flac$/i, ".opus")}`
+          : null;
+      const [flacOk, opusOk] = await Promise.all([
+        flacCand ? pathExists(flacCand) : Promise.resolve(false),
+        opusCand ? pathExists(opusCand) : Promise.resolve(false),
+      ]);
+      if (cancelled) return;
+      setFlacPath(flacOk ? flacCand : null);
+      setOpusPath(opusOk ? opusCand : null);
+      // Default to the Opus web copy when it exists (the web-publish artifact).
+      setFormat(opusOk ? "opus" : "flac");
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file?.path]);
+
+  // The path + name actually published, per the format choice.
+  const publishPath =
+    format === "opus"
+      ? (opusPath ?? file?.path ?? "")
+      : (flacPath ?? file?.path ?? "");
+  const publishName = publishPath.split("/").pop() ?? file?.name ?? "";
 
   function addRelay() {
     const url = newRelay.trim();
@@ -171,14 +234,14 @@ export function NostrPanel({
 
     try {
       setStatus({ kind: "reading" });
-      const bytes = await readAudioFile(file.path);
+      const bytes = await readAudioFile(publishPath);
 
       setStatus({ kind: "uploading" });
       const upload = await uploadToNip96(
         identity.sk,
         bytes,
-        file.name,
-        mimeFor(file.name),
+        publishName,
+        mimeFor(publishName),
         endpoint,
       );
 
@@ -400,8 +463,42 @@ export function NostrPanel({
               the invisible-Add placeholder so the Publish button
               sits in the same column as the Add button above). ---- */}
       <div className="mt-3">
-        <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
-          Title
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] uppercase tracking-wide text-muted">
+            Title
+          </span>
+          {/* Publish format — shown only when both the FLAC clip and its Opus
+              web copy exist. Opus is the default (the web-publish artifact). */}
+          {flacPath && opusPath && (
+            <div className="flex gap-0.5 text-[10px] font-medium">
+              <button
+                type="button"
+                onClick={() => setFormat("flac")}
+                title="Publish the lossless FLAC clip"
+                className={cn(
+                  "px-1.5 py-0.5 rounded",
+                  format === "flac"
+                    ? "bg-accent text-bg"
+                    : "bg-surface text-muted hover:text-fg",
+                )}
+              >
+                FLAC
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormat("opus")}
+                title="Publish the web-optimized Opus copy"
+                className={cn(
+                  "px-1.5 py-0.5 rounded",
+                  format === "opus"
+                    ? "bg-accent text-bg"
+                    : "bg-surface text-muted hover:text-fg",
+                )}
+              >
+                Opus
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
           <input

@@ -36,12 +36,19 @@ export interface FolderEntry {
   path: string; // absolute, for drilling in
   audioCount: number;
   videoCount: number; // direct video files — marks releases carrying A/V
+  discCount: number; // 1 normally; >1 for a multi-disc release (CD1/CD2/… collapsed)
 }
 
 /// List leaf folders under `dir` with audio counts — the folder-grain
 /// "has audio / no audio" view for a parent dir (e.g. /data/music_clips).
 export async function listLeafFolders(dir: string): Promise<FolderEntry[]> {
   return invoke<FolderEntry[]>("list_leaf_folders", { dir });
+}
+
+/// Does a path exist on disk? Used to offer the Opus web copy of a FLAC clip
+/// at publish time only when it has actually been compressed.
+export async function pathExists(path: string): Promise<boolean> {
+  return invoke<boolean>("path_exists", { path });
 }
 
 /// Resolution of a file against the shared suite roots manifest
