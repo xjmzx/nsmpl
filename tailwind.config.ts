@@ -20,6 +20,7 @@ export default {
         muted: c("--c-muted"),
         accent: c("--c-accent"),
         digital: c("--c-digital"),
+        opus: c("--c-opus"),
         ok: c("--c-ok"),
         medium: c("--c-medium"),
         warn: c("--c-warn"),

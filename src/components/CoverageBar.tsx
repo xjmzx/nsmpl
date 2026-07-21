@@ -51,7 +51,7 @@ export function ClipBar({ cov }: { cov: ClipCoverage | undefined }) {
       className="flex items-center"
       title={`${fmtClip(clip)} clip of ${fmtDur(source)}`}
     >
-      <span className="relative flex-1 h-1.5 rounded-full bg-surface/60 overflow-hidden">
+      <span className="relative flex-1 h-1.5 rounded-full bg-opus/15 overflow-hidden">
         <span
           className={cn("absolute inset-y-0 left-0 rounded-full bg-medium")}
           style={{ width: barWidth(frac) }}
@@ -78,7 +78,7 @@ export function CoverageBar({ rows }: { rows: ClipCoverage[] }) {
       className="flex items-center"
       title={`Clip coverage · ${fmtDur(clip)} sampled of ${fmtDur(source)}`}
     >
-      <span className="relative flex-1 h-1 rounded-full bg-surface/60 overflow-hidden">
+      <span className="relative flex-1 h-1 rounded-full bg-opus/15 overflow-hidden">
         <span
           className="absolute inset-y-0 left-0 rounded-full bg-medium/80"
           style={{ width: barWidth(clip / source) }}
