@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Globe,
   Home,
+  Music,
   Radio,
   Film,
   FolderInput,
@@ -81,6 +83,13 @@ interface FileBrowserProps {
 }
 
 const DIR_KEY = "smpl-tool.lib.dir";
+// Per-app roots for the three suite dirs (option 2 — no shared-manifest change).
+// Clips uses the manifest `home`; Source + Web are these persisted per-app paths.
+const SRC_ROOT_KEY = "smpl-tool.root.source";
+const WEB_ROOT_KEY = "smpl-tool.root.web";
+const DEFAULT_SOURCE_ROOT = "/data/music";
+const DEFAULT_CLIPS_ROOT = "/data/music_clips";
+const DEFAULT_WEB_ROOT = "/data/music_clips_comp";
 const SORT_KEY = "smpl-tool.lib.sort";
 const RECENT_KEY = "smpl-tool.lib.recent";
 
@@ -199,6 +208,15 @@ export function FileBrowser({
 }: FileBrowserProps) {
   const D = DENSITY[density];
   const [dir, setDir] = useState(() => localStorage.getItem(DIR_KEY) ?? "");
+  // Source (music) + Web (Opus) roots — the two per-app quick-jump targets that
+  // complement the manifest-derived Clips `home`. Shift-click their toolbar
+  // buttons to re-point them.
+  const [sourceRoot, setSourceRoot] = useState(
+    () => localStorage.getItem(SRC_ROOT_KEY) ?? DEFAULT_SOURCE_ROOT,
+  );
+  const [webRoot, setWebRoot] = useState(
+    () => localStorage.getItem(WEB_ROOT_KEY) ?? DEFAULT_WEB_ROOT,
+  );
   const [files, setFiles] = useState<AudioFile[]>([]);
   // Folder mode: the loaded dir held no direct audio, so we list its leaf
   // folders (release-grain, artist/release columns + has-audio dot) instead of
@@ -222,8 +240,14 @@ export function FileBrowser({
   const [recents, setRecents] = useState<Recent[]>(loadRecents);
   useEffect(() => {
     clipsRoot()
-      .then(setHome)
+      .then((h) => {
+        setHome(h);
+        // Fresh install (nothing persisted) → land on the FLAC clips tree,
+        // the default working set. A returning user keeps their last dir.
+        if (!localStorage.getItem(DIR_KEY)) loadDir(h ?? DEFAULT_CLIPS_ROOT);
+      })
       .catch(() => setHome(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     releasedRels()
@@ -362,6 +386,29 @@ export function FileBrowser({
     if (typeof picked === "string") loadDir(picked);
   }
 
+  // Shift-click a root button → pick + persist that root, then jump to it.
+  async function pickRoot(which: "source" | "web") {
+    const cur = which === "source" ? sourceRoot : webRoot;
+    const picked = await open({
+      directory: true,
+      multiple: false,
+      title:
+        which === "source"
+          ? "Set the source library root"
+          : "Set the web (Opus) clips root",
+      defaultPath: cur || undefined,
+    });
+    if (typeof picked !== "string") return;
+    if (which === "source") {
+      setSourceRoot(picked);
+      localStorage.setItem(SRC_ROOT_KEY, picked);
+    } else {
+      setWebRoot(picked);
+      localStorage.setItem(WEB_ROOT_KEY, picked);
+    }
+    loadDir(picked);
+  }
+
   function toggleSort(key: SortKey) {
     setSort((s) =>
       s.key === key
@@ -448,7 +495,7 @@ export function FileBrowser({
         </p>
       ) : (
         <>
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <input
           type="text"
           value={dir}
@@ -464,24 +511,6 @@ export function FileBrowser({
           spellCheck={false}
         />
         <button
-          onClick={() => home && loadDir(home)}
-          disabled={loading || !home || dir === home}
-          className={cn(
-            "rounded-md bg-surface hover:bg-surfaceHover",
-            "text-fg disabled:opacity-50 disabled:cursor-not-allowed",
-            "flex items-center",
-            D.control,
-          )}
-          title={
-            home
-              ? `Home — the clip tree root (${home})`
-              : "No clips root in the suite roots manifest"
-          }
-          aria-label="Home — clip tree root"
-        >
-          <Home size={14} />
-        </button>
-        <button
           onClick={goUp}
           disabled={loading || !dir}
           className={cn(
@@ -495,6 +524,65 @@ export function FileBrowser({
         >
           <FolderInput size={14} className="-scale-y-100" />
         </button>
+        {/* Root switcher — a set of three quick-jumps across the suite dirs,
+            acting on the path field to their left. Clips is the manifest home
+            (source resolution + coverage read from it); Source and Web are
+            per-app roots (shift-click a button to re-point it). The active view
+            is inverted so the current tree reads at a glance. */}
+        <div className="flex gap-0.5">
+          <button
+            onClick={(e) => (e.shiftKey ? pickRoot("source") : loadDir(sourceRoot))}
+            disabled={loading || !sourceRoot}
+            className={cn(
+              "rounded-md flex items-center",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              dir === sourceRoot
+                ? "bg-accent text-bg"
+                : "bg-surface hover:bg-surfaceHover text-fg",
+              D.control,
+            )}
+            title={`Source library (${sourceRoot}) — click to go · shift-click to set`}
+            aria-label="Source library root"
+          >
+            <Music size={14} />
+          </button>
+          <button
+            onClick={() => home && loadDir(home)}
+            disabled={loading || !home}
+            className={cn(
+              "rounded-md flex items-center",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              dir === home
+                ? "bg-accent text-bg"
+                : "bg-surface hover:bg-surfaceHover text-fg",
+              D.control,
+            )}
+            title={
+              home
+                ? `Clips — the FLAC clip tree root (${home})`
+                : "No clips root in the suite roots manifest"
+            }
+            aria-label="Clips — clip tree root"
+          >
+            <Home size={14} />
+          </button>
+          <button
+            onClick={(e) => (e.shiftKey ? pickRoot("web") : loadDir(webRoot))}
+            disabled={loading || !webRoot}
+            className={cn(
+              "rounded-md flex items-center",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              dir === webRoot
+                ? "bg-accent text-bg"
+                : "bg-surface hover:bg-surfaceHover text-fg",
+              D.control,
+            )}
+            title={`Web (Opus) clips (${webRoot}) — click to go · shift-click to set`}
+            aria-label="Web/Opus clips root"
+          >
+            <Globe size={14} />
+          </button>
+        </div>
         <button
           onClick={browse}
           disabled={loading}
