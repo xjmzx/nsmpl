@@ -48,6 +48,7 @@ import {
   type AudioInfo,
   type BpmKnown,
 } from "../lib/tauri";
+import { editGuardReason } from "../lib/roots";
 import { cn } from "../lib/cn";
 
 interface PlayerProps {
@@ -540,7 +541,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   }, [playing, fadeInSec, fadeOutSec, volume, duration]);
 
   async function runGain() {
-    if (!file || editBusy) return;
+    if (!file || editBusy || editGuarded) return;
     setEditBusy("gain");
     setEditStatus(null);
     try {
@@ -556,7 +557,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   }
 
   async function runPad(mode: "padstart" | "padend" | "padmid") {
-    if (!file || editBusy) return;
+    if (!file || editBusy || editGuarded) return;
     if (mode === "padmid" && !regionRange) return;
     setEditBusy(mode);
     setEditStatus(null);
@@ -575,7 +576,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   }
 
   async function runEdit(mode: "trim" | "prune") {
-    if (!file || !regionRange || editBusy) return;
+    if (!file || !regionRange || editBusy || editGuarded) return;
     setEditBusy(mode);
     setEditStatus(null);
     try {
@@ -842,8 +843,13 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
     regionsRef.current?.clearRegions();
   }
 
+  // Read-only guard: destructive edits must not touch a source master or a web
+  // (Opus) copy — only the FLAC clips are the working set. `guardReason` is the
+  // human explanation (null ⇒ editable); it disables the whole edits row.
+  const guardReason = editGuardReason(file?.path);
+  const editGuarded = guardReason !== null;
   const editReady = !!file && !!regionRange && regionRange.end > regionRange.start;
-  const editDisabled = !editReady || editBusy !== null;
+  const editDisabled = !editReady || editBusy !== null || editGuarded;
 
   // Slim: filename folds into the title so the panel can skip the
   // separate "now loaded" row. Wide: bare "Track N" title.
@@ -1366,6 +1372,14 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
           mt-2 separates it from the transport row above. */}
       {editsExpanded && (
         <div className="mt-2 flex items-center gap-2 flex-wrap">
+          {/* Read-only guard — destructive edits are off-limits on a source
+              master / web copy; the FLAC clips are the working set. */}
+          {guardReason && (
+            <p className="w-full text-[11px] text-warn/90">
+              Editing disabled — this is a {guardReason}. Switch to the Clips
+              (FLAC) view to edit.
+            </p>
+          )}
           <button
             onClick={() => runEdit("trim")}
             disabled={editDisabled}
@@ -1443,7 +1457,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                 step={0.5}
                 value={gainDb}
                 onChange={(e) => setGainDb(parseFloat(e.target.value))}
-                disabled={!file || editBusy !== null}
+                disabled={!file || editBusy !== null || editGuarded}
                 aria-label="Gain in dB"
                 className="w-24 accent-mauve cursor-pointer disabled:cursor-not-allowed"
               />
@@ -1454,7 +1468,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             </div>
             <button
               onClick={runGain}
-              disabled={!file || editBusy !== null}
+              disabled={!file || editBusy !== null || editGuarded}
               className={cn(
                 D.btn,
                 "border-l border-bg/40 text-fg",
@@ -1498,7 +1512,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
                 step={0.05}
                 value={padDur}
                 onChange={(e) => setPadDur(parseFloat(e.target.value))}
-                disabled={!file || editBusy !== null}
+                disabled={!file || editBusy !== null || editGuarded}
                 aria-label="Pad silence duration in seconds"
                 className="w-20 accent-mauve cursor-pointer disabled:cursor-not-allowed"
               />
@@ -1508,7 +1522,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             </div>
             <button
               onClick={() => runPad("padstart")}
-              disabled={!file || editBusy !== null}
+              disabled={!file || editBusy !== null || editGuarded}
               title={
                 editBusy === "padstart"
                   ? "Padding start…"
@@ -1532,7 +1546,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             </button>
             <button
               onClick={() => runPad("padend")}
-              disabled={!file || editBusy !== null}
+              disabled={!file || editBusy !== null || editGuarded}
               title={
                 editBusy === "padend"
                   ? "Padding end…"
@@ -1556,7 +1570,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
             </button>
             <button
               onClick={() => runPad("padmid")}
-              disabled={!file || editBusy !== null || !regionRange}
+              disabled={!file || editBusy !== null || !regionRange || editGuarded}
               title={
                 editBusy === "padmid"
                   ? "Padding at region…"
