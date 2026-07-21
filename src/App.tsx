@@ -547,7 +547,9 @@ export default function App() {
             title={
               theme === "fizx"
                 ? "Theme: fizx.uk — click to switch to upleb.uk"
-                : "Theme: upleb.uk — click to switch to fizx.uk"
+                : theme === "upleb"
+                  ? "Theme: upleb.uk — click to switch to monochrome"
+                  : "Theme: monochrome — click to switch to fizx.uk"
             }
             aria-label="Switch colour theme"
             className="text-2xl font-bold tracking-tight leading-none shrink-0

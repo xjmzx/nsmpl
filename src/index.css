@@ -16,6 +16,10 @@
   --c-accent: 122 240 205;
   --c-digital: 125 211 252;
   --c-ok: 74 222 128;
+  /* Neutral leaf / coverage mark — green here, GREY in the mono theme (below),
+     mirroring ndisc / ntree. Decorative leaf-dots + coverage bars use this so
+     mono reads monochrome; --c-ok stays green for a true OK/verdict state. */
+  --c-medium: 74 222 128;
   --c-warn: 251 191 36;
   --c-alert: 248 113 113;
   --c-mauve: 167 139 250;
@@ -32,6 +36,8 @@
   --c-accent: 255 182 158;
   --c-digital: 255 120 73;
   --c-ok: 74 222 128;
+  /* same leaf green as :root — colour themes keep it green; only mono greys it */
+  --c-medium: 74 222 128;
   --c-warn: 251 191 36;
   --c-alert: 248 113 113;
   --c-mauve: 255 179 71;
@@ -99,4 +105,8 @@ body {
   --c-mauve: 198 198 204;
   --c-digital: 152 152 159;
   --c-auburn: 150 150 156;
+  /* Neutral mark greyed for mono — off-white, matching ndisc's --c-medium.
+     The green leaf dots + coverage bars resolve here so mono is monochrome;
+     --c-ok (a real OK state) is deliberately NOT greyed. */
+  --c-medium: 210 210 216;
 }

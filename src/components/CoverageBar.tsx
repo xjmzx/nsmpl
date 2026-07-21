@@ -53,7 +53,7 @@ export function ClipBar({ cov }: { cov: ClipCoverage | undefined }) {
     >
       <span className="relative flex-1 h-1.5 rounded-full bg-surface/60 overflow-hidden">
         <span
-          className={cn("absolute inset-y-0 left-0 rounded-full bg-ok")}
+          className={cn("absolute inset-y-0 left-0 rounded-full bg-medium")}
           style={{ width: barWidth(frac) }}
         />
       </span>
@@ -80,7 +80,7 @@ export function CoverageBar({ rows }: { rows: ClipCoverage[] }) {
     >
       <span className="relative flex-1 h-1 rounded-full bg-surface/60 overflow-hidden">
         <span
-          className="absolute inset-y-0 left-0 rounded-full bg-ok/80"
+          className="absolute inset-y-0 left-0 rounded-full bg-medium/80"
           style={{ width: barWidth(clip / source) }}
         />
       </span>

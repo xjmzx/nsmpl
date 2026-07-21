@@ -21,6 +21,7 @@ export default {
         accent: c("--c-accent"),
         digital: c("--c-digital"),
         ok: c("--c-ok"),
+        medium: c("--c-medium"),
         warn: c("--c-warn"),
         alert: c("--c-alert"),
         mauve: c("--c-mauve"),
