@@ -26,7 +26,7 @@ export function CollapsedStrip({
       title={`Expand ${label}`}
       aria-label={`Expand ${label}`}
       className={cn(
-        "rounded-xl bg-panel border shadow-md flex flex-col items-center gap-2 py-3",
+        "rounded-xl bg-panel shadow-md flex flex-col items-center gap-2 py-3",
         "text-muted hover:text-fg transition-colors cursor-pointer",
         className,
       )}

@@ -1248,6 +1248,16 @@ fn strip_clip_suffix(rel: &str) -> Option<String> {
     })
 }
 
+/// Swap a path's final extension for `new_ext` (no leading dot):
+/// "A/B/01.10s.flac" → "A/B/01.10s.opus". Used to map a FLAC clip's rel to its
+/// Opus web copy, which the compress step names by swapping only the extension.
+fn swap_ext(rel: &str, new_ext: &str) -> String {
+    match rel.rsplit_once('.') {
+        Some((base, _)) => format!("{base}.{new_ext}"),
+        None => format!("{rel}.{new_ext}"),
+    }
+}
+
 /// In the directory implied by `<root>/<dir(stem_rel)>`, find an audio file
 /// whose stem equals `basename(stem_rel)` (source extension may differ from
 /// the clip's). Returns its absolute path.
@@ -1331,10 +1341,17 @@ struct ClipCoverage {
     path: String,
     clip_secs: Option<f64>,
     source_secs: Option<f64>,
+    /// The clip's Opus web copy exists under `web_root` (the compress-dest
+    /// mirror — same sub-path, `.flac` → `.opus`). False when no web root is
+    /// passed or the copy is absent. Powers the third coverage-by-type dot.
+    opus_exists: bool,
 }
 
 #[tauri::command]
-fn folder_coverage(dir: String) -> Result<Vec<ClipCoverage>, String> {
+fn folder_coverage(
+    dir: String,
+    web_root: Option<String>,
+) -> Result<Vec<ClipCoverage>, String> {
     let files = list_audio_files(dir)?;
     let mut out = Vec::with_capacity(files.len());
     for f in files {
@@ -1343,6 +1360,7 @@ fn folder_coverage(dir: String) -> Result<Vec<ClipCoverage>, String> {
                 path: f.path,
                 clip_secs: None,
                 source_secs: None,
+                opus_exists: false,
             });
             continue;
         }
@@ -1352,10 +1370,23 @@ fn folder_coverage(dir: String) -> Result<Vec<ClipCoverage>, String> {
             (true, Some(sp)) => probe_duration(&sp).ok(),
             _ => None,
         };
+        // Opus web copy — the clip's rel (under the clips root, from
+        // resolve_source) mapped into the web root with the extension swapped.
+        // A header-free existence check, so it stays as cheap as the bar probe.
+        let opus_exists = match (&web_root, &res.rel) {
+            (Some(wr), Some(rel)) if !wr.is_empty() => Path::new(&format!(
+                "{}/{}",
+                wr.trim_end_matches('/'),
+                swap_ext(rel, "opus")
+            ))
+            .is_file(),
+            _ => false,
+        };
         out.push(ClipCoverage {
             path: f.path,
             clip_secs,
             source_secs,
+            opus_exists,
         });
     }
     Ok(out)

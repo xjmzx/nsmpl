@@ -75,10 +75,16 @@ export interface ClipCoverage {
   path: string;
   clipSecs: number | null;
   sourceSecs: number | null;
+  /** The clip's Opus web copy exists under the web root (compress-dest mirror).
+   *  Drives the third coverage-by-type dot. */
+  opusExists: boolean;
 }
 
-export async function folderCoverage(dir: string): Promise<ClipCoverage[]> {
-  return invoke<ClipCoverage[]>("folder_coverage", { dir });
+export async function folderCoverage(
+  dir: string,
+  webRoot?: string,
+): Promise<ClipCoverage[]> {
+  return invoke<ClipCoverage[]>("folder_coverage", { dir, webRoot });
 }
 
 /// Relpaths (under the library root) of the releases ndisc has published to

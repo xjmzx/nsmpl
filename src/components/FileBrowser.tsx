@@ -10,6 +10,7 @@ import {
   FolderInput,
   FolderOpen,
   RefreshCw,
+  Scissors,
   Search,
   X,
 } from "lucide-react";
@@ -181,7 +182,7 @@ function fmtModified(unixSec: number): string {
 
 // Three-column grid shared by header + rows so the headers line up with
 // their values.
-const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem_5rem] gap-3 items-center";
+const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem_5rem_auto] gap-3 items-center";
 // Folder-mode grid: artist | release | leaf meter. The leaf meter doubles as
 // the audio-presence cue — lit (green) leaves when the release holds audio,
 // all-dim when it's a sampling gap — so no separate dot column is needed.
@@ -318,7 +319,7 @@ export function FileBrowser({
           setCoverage(new Map(cached.map((c) => [c.path, c])));
         } else {
           setCoverage(new Map());
-          folderCoverage(path)
+          folderCoverage(path, webRoot)
             .then((rows) => {
               coverageCache.current.set(path, rows);
               if (coverageDirRef.current === path) {
@@ -491,6 +492,18 @@ export function FileBrowser({
     if (parent) loadDir(parent);
   }
 
+  // Which of the three suite trees this listing belongs to — drives the single
+  // per-view type marker, so a glance says whether you're browsing (and about
+  // to select from) source FLAC, 10s FLAC clips, or Opus web copies. null when
+  // the dir sits outside all three roots. The `+ "/"` in underRoot guards the
+  // music / music_clips / music_clips_comp prefix overlap.
+  const viewType: "source" | "clip" | "opus" | null = underRoot(sourceRoot)
+    ? "source"
+    : underRoot(home)
+      ? "clip"
+      : underRoot(webRoot)
+        ? "opus"
+        : null;
   const filterActive = query.trim().length > 0;
   const noMatches =
     filterActive && !folderMode && sortedFiles.length === 0;
@@ -810,7 +823,7 @@ export function FileBrowser({
         <div
           className={cn(
             folderMode ? FOLDER_GRID_CLS : GRID_CLS,
-            "px-3 py-1.5 text-[10px] uppercase tracking-wide text-muted",
+            "px-3 py-1 text-[10px] uppercase tracking-wide text-muted",
             "border-b border-surface/60",
           )}
         >
@@ -850,6 +863,12 @@ export function FileBrowser({
               >
                 <CoverageBar rows={[...coverage.values()]} />
               </span>
+              {/* Column header names the current view's type. */}
+              {viewType ? (
+                <ViewMarker type={viewType} showLabel />
+              ) : (
+                <span />
+              )}
             </>
           )}
         </div>
@@ -873,7 +892,7 @@ export function FileBrowser({
                     onClick={() => loadDir(fld.path)}
                     className={cn(
                       FOLDER_GRID_CLS,
-                      "px-3 py-2 text-xs font-mono cursor-pointer hover:bg-surface/40",
+                      "px-3 py-1 text-xs font-mono cursor-pointer hover:bg-surface/40",
                       !hasMedia && "text-muted",
                     )}
                     title={
@@ -937,7 +956,7 @@ export function FileBrowser({
                   onClick={() => onSelect?.(f)}
                   className={cn(
                     GRID_CLS,
-                    "px-3 py-2 text-xs font-mono cursor-pointer",
+                    "px-3 py-1 text-xs font-mono cursor-pointer",
                     "hover:bg-surface/40",
                     selected?.path === f.path && "bg-surface/70 text-accent",
                   )}
@@ -960,6 +979,7 @@ export function FileBrowser({
                     {fmtModified(f.modified)}
                   </span>
                   <ClipBar cov={coverage.get(f.path)} />
+                  {viewType ? <ViewMarker type={viewType} /> : <span />}
                 </li>
               ))}
             </>
@@ -969,6 +989,39 @@ export function FileBrowser({
         </>
       )}
     </Section>
+  );
+}
+
+// The three library views and their type marks. Source + clip are FLAC
+// (neutral --c-medium — grey in mono, green in colour), distinguished by icon
+// (Music vs Scissors); Opus keeps its stable identity — the --c-opus blue +
+// Globe icon set in ntree.
+const VIEW_MARK = {
+  source: { Icon: Music, cls: "text-medium", label: "source audio", short: "source" },
+  clip: { Icon: Scissors, cls: "text-medium", label: "10s FLAC clip", short: "clip" },
+  opus: { Icon: Globe, cls: "text-opus", label: "Opus web copy", short: "opus" },
+};
+
+// A single per-view type marker: which of the three trees this listing belongs
+// to. Distributed one-per-view (not three-per-row) so the indicator says what
+// you're browsing and about to select. `showLabel` names it in the header.
+function ViewMarker({
+  type,
+  showLabel,
+}: {
+  type: "source" | "clip" | "opus";
+  showLabel?: boolean;
+}) {
+  const M = VIEW_MARK[type];
+  const Icon = M.Icon;
+  return (
+    <span
+      className={cn("flex items-center justify-end gap-1", M.cls)}
+      title={M.label}
+    >
+      <Icon size={showLabel ? 11 : 12} />
+      {showLabel && M.short}
+    </span>
   );
 }
 
