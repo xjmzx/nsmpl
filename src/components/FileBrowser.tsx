@@ -3,16 +3,15 @@ import {
   ChevronDown,
   ChevronUp,
   Globe,
-  Home,
   Music,
   Radio,
   Film,
   FolderInput,
   FolderOpen,
   RefreshCw,
-  Scissors,
   Search,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Section } from "./Section";
@@ -136,7 +135,7 @@ function classify(path: string, root: string | null): Recent | null {
   };
 }
 
-type SortKey = "name" | "size" | "modified";
+type SortKey = "name" | "size" | "modified" | "duration";
 type SortDir = "asc" | "desc";
 type Sort = { key: SortKey; dir: SortDir };
 
@@ -150,7 +149,8 @@ function loadSort(): Sort {
     const keyOk =
       parsed.key === "name" ||
       parsed.key === "size" ||
-      parsed.key === "modified";
+      parsed.key === "modified" ||
+      parsed.key === "duration";
     const dirOk = parsed.dir === "asc" || parsed.dir === "desc";
     return keyOk && dirOk ? parsed : DEFAULT_SORT;
   } catch {
@@ -180,9 +180,39 @@ function fmtModified(unixSec: number): string {
   });
 }
 
+// Clip length from the filename convention "<stem>.<N>s.<ext>" (e.g.
+// "Moog Dub.10s.flac" → 10). Instant, no probe — the clip + web trees always
+// carry it; source tracks (no suffix) return null and fall back to the probe.
+function clipSecsFromName(name: string): number | null {
+  const m = name.match(/\.(\d+)s\.[^.]+$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// A file's duration in seconds: the filename nominal first (instant + stable
+// for sorting in the clip/web views), else the live-probed length from
+// folderCoverage — the same header-read the Sample panel shows, and how source
+// tracks (which carry no ".Ns." suffix) get a length at all.
+function durationOf(
+  f: AudioFile,
+  coverage: Map<string, ClipCoverage>,
+): number | null {
+  return clipSecsFromName(f.name) ?? coverage.get(f.path)?.clipSecs ?? null;
+}
+
+// Sub-minute reads as "Ns" (a clip shows "10s"); longer as m:ss / h:mm:ss.
+function fmtLen(secs: number): string {
+  if (secs < 60) return `${Math.round(secs)}s`;
+  const s = Math.round(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = (s % 60).toString().padStart(2, "0");
+  return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
 // Three-column grid shared by header + rows so the headers line up with
 // their values.
-const GRID_CLS = "grid grid-cols-[1fr_5rem_5rem_5rem_auto] gap-3 items-center";
+const GRID_CLS =
+  "grid grid-cols-[1fr_4rem_4.5rem_4.5rem_5rem_auto] gap-3 items-center";
 // Folder-mode grid: artist | release | leaf meter. The leaf meter doubles as
 // the audio-presence cue — lit (green) leaves when the release holds audio,
 // all-dim when it's a sampling gap — so no separate dot column is needed.
@@ -454,13 +484,18 @@ export function FileBrowser({
         v = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
       } else if (sort.key === "size") {
         v = a.size - b.size;
+      } else if (sort.key === "duration") {
+        const da = durationOf(a, coverage);
+        const db = durationOf(b, coverage);
+        // Unknown lengths (a source track not probed yet) sort last.
+        v = da == null && db == null ? 0 : (da ?? Infinity) - (db ?? Infinity);
       } else {
         v = a.modified - b.modified;
       }
       return sort.dir === "asc" ? v : -v;
     });
     return arr;
-  }, [files, sort, query]);
+  }, [files, sort, query, coverage]);
 
   // Folder-mode rows: filtered by the search box (on rel) and the has/no-audio
   // toggle. Already sorted by rel from the backend.
@@ -562,11 +597,12 @@ export function FileBrowser({
         >
           <FolderInput size={14} className="-scale-y-100" />
         </button>
-        {/* Root switcher — a set of three quick-jumps across the suite dirs,
-            acting on the path field to their left. Clips is the manifest home
-            (source resolution + coverage read from it); Source and Web are
-            per-app roots (shift-click a button to re-point it). The active view
-            is inverted so the current tree reads at a glance. */}
+        {/* Root switcher — two quick-jumps (Source · Clips), acting on the path
+            field to their left. Clips is the manifest home (source resolution +
+            coverage read from it); Source is a per-app root (shift-click to
+            re-point). The Opus/web tree is no longer a browse target — it's
+            surfaced as a per-row "opus exists" chip in the clip view instead.
+            The active view is inverted so the current tree reads at a glance. */}
         <div className="flex gap-0.5">
           <button
             onClick={(e) => (e.shiftKey ? pickRoot("source") : switchRoot(sourceRoot))}
@@ -582,7 +618,7 @@ export function FileBrowser({
             title={`Source library (${sourceRoot}) — keeps sub-path · shift-click to set`}
             aria-label="Source library root"
           >
-            <Music size={14} />
+            <DiscIcon size={14} />
           </button>
           <button
             onClick={() => home && switchRoot(home)}
@@ -602,23 +638,7 @@ export function FileBrowser({
             }
             aria-label="Clips — clip tree root"
           >
-            <Home size={14} />
-          </button>
-          <button
-            onClick={(e) => (e.shiftKey ? pickRoot("web") : switchRoot(webRoot))}
-            disabled={loading || !webRoot}
-            className={cn(
-              "rounded-md flex items-center",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              underRoot(webRoot)
-                ? "bg-accent text-bg"
-                : "bg-surface hover:bg-surfaceHover text-fg",
-              D.control,
-            )}
-            title={`Web (Opus) clips (${webRoot}) — keeps sub-path · shift-click to set`}
-            aria-label="Web/Opus clips root"
-          >
-            <Globe size={14} />
+            <SamplerIcon size={14} />
           </button>
         </div>
         <button
@@ -844,6 +864,13 @@ export function FileBrowser({
                 onToggle={toggleSort}
               />
               <SortHeader
+                label="length"
+                k="duration"
+                sort={sort}
+                onToggle={toggleSort}
+                align="right"
+              />
+              <SortHeader
                 label="size"
                 k="size"
                 sort={sort}
@@ -863,9 +890,15 @@ export function FileBrowser({
               >
                 <CoverageBar rows={[...coverage.values()]} />
               </span>
-              {/* Column header names the current view's type. */}
+              {/* Column header names the current view's type; in the clip view
+                  a dim Globe labels the per-row "opus exists" chip. */}
               {viewType ? (
-                <ViewMarker type={viewType} showLabel />
+                <span className="flex items-center justify-end gap-1.5">
+                  <ViewMarker type={viewType} showLabel />
+                  {viewType === "clip" && (
+                    <Globe size={11} className="text-muted/40" />
+                  )}
+                </span>
               ) : (
                 <span />
               )}
@@ -950,7 +983,10 @@ export function FileBrowser({
                       : "No files."}
                 </li>
               )}
-              {sortedFiles.map((f) => (
+              {sortedFiles.map((f) => {
+                const dur = durationOf(f, coverage);
+                const opus = coverage.get(f.path)?.opusExists ?? false;
+                return (
                 <li
                   key={f.path}
                   onClick={() => onSelect?.(f)}
@@ -972,6 +1008,9 @@ export function FileBrowser({
                     )}
                     <span className="truncate">{f.name}</span>
                   </span>
+                  <span className="text-muted text-right shrink-0 tabular-nums">
+                    {dur != null ? fmtLen(dur) : "—"}
+                  </span>
                   <span className="text-muted text-right shrink-0">
                     {fmtSize(f.size)}
                   </span>
@@ -979,9 +1018,29 @@ export function FileBrowser({
                     {fmtModified(f.modified)}
                   </span>
                   <ClipBar cov={coverage.get(f.path)} />
-                  {viewType ? <ViewMarker type={viewType} /> : <span />}
+                  {viewType ? (
+                    <span className="flex items-center justify-end gap-1.5 shrink-0">
+                      <ViewMarker type={viewType} />
+                      {/* Opus web-copy presence — surfaced here instead of a
+                          separate Opus browse view (the tree is a FLAC mirror). */}
+                      {viewType === "clip" && (
+                        <span
+                          title={`Opus web copy — ${opus ? "present" : "absent"}`}
+                          className={cn(
+                            "inline-flex",
+                            opus ? "text-opus" : "text-muted/30",
+                          )}
+                        >
+                          <Globe size={12} />
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
                 </li>
-              ))}
+                );
+              })}
             </>
           )}
         </ul>
@@ -992,19 +1051,23 @@ export function FileBrowser({
   );
 }
 
-// The three library views and their type marks. Source + clip are FLAC
-// (neutral --c-medium — grey in mono, green in colour), distinguished by icon
-// (Music vs Scissors); Opus keeps its stable identity — the --c-opus blue +
-// Globe icon set in ntree.
-const VIEW_MARK = {
+// The three library views and their type marks. Source keeps the Music icon;
+// the clip view marks with a plain suite dot (the neutral --c-medium mark used
+// for leaf/coverage dots across the suite — off-white in mono, green in colour);
+// Opus keeps its stable identity — the --c-opus blue + Globe icon set in ntree.
+const VIEW_MARK: Record<
+  "source" | "clip" | "opus",
+  { Icon?: LucideIcon; cls: string; label: string; short: string }
+> = {
   source: { Icon: Music, cls: "text-medium", label: "source audio", short: "source" },
-  clip: { Icon: Scissors, cls: "text-medium", label: "10s FLAC clip", short: "clip" },
+  clip: { cls: "text-medium", label: "10s FLAC clip", short: "clip" },
   opus: { Icon: Globe, cls: "text-opus", label: "Opus web copy", short: "opus" },
 };
 
 // A single per-view type marker: which of the three trees this listing belongs
 // to. Distributed one-per-view (not three-per-row) so the indicator says what
-// you're browsing and about to select. `showLabel` names it in the header.
+// you're browsing and about to select. `showLabel` names it in the header. An
+// entry with no Icon (the clip view) renders as the neutral suite dot.
 function ViewMarker({
   type,
   showLabel,
@@ -1019,9 +1082,66 @@ function ViewMarker({
       className={cn("flex items-center justify-end gap-1", M.cls)}
       title={M.label}
     >
-      <Icon size={showLabel ? 11 : 12} />
+      {Icon ? (
+        <Icon size={showLabel ? 11 : 12} />
+      ) : (
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
+      )}
       {showLabel && M.short}
     </span>
+  );
+}
+
+// Custom suite glyphs for the Library root switcher, monochrome / currentColor
+// so they theme + invert with the button state (unlike the source SVGs' baked
+// colours). DiscIcon = the Source tree (a record you sample from); SamplerIcon =
+// the Clip tree (the sample device). SamplerIcon is a distilled MPC — the master
+// art's 7 pads + fader don't survive a 14px button, so it's body + screen + a
+// 2×3 pad grid.
+function DiscIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 400 400"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="200" cy="200" r="192" fill="currentColor" />
+      <circle cx="200" cy="200" r="62" fill="currentColor" opacity="0.3" />
+      <circle cx="200" cy="200" r="14" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SamplerIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect
+        x="3"
+        y="2.5"
+        width="18"
+        height="19"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <rect x="6" y="5" width="12" height="3.4" rx="1" />
+      <rect x="6" y="11" width="3.2" height="3.2" rx="0.7" />
+      <rect x="10.4" y="11" width="3.2" height="3.2" rx="0.7" />
+      <rect x="14.8" y="11" width="3.2" height="3.2" rx="0.7" />
+      <rect x="6" y="15.4" width="3.2" height="3.2" rx="0.7" />
+      <rect x="10.4" y="15.4" width="3.2" height="3.2" rx="0.7" />
+      <rect x="14.8" y="15.4" width="3.2" height="3.2" rx="0.7" />
+    </svg>
   );
 }
 
