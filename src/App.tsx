@@ -538,7 +538,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen p-6 max-w-[1500px] mx-auto flex flex-col gap-4">
-      <header className="rounded-lg bg-panel border border-surface/60 px-4 py-3
+      <header className="rounded-lg bg-panel shadow-md px-4 py-3
                          grid grid-cols-[1fr_auto_1fr] items-center gap-4">
         <div className="flex items-center gap-3 shrink-0">
           <button
@@ -740,7 +740,7 @@ export default function App() {
         />
       </div>
 
-      <footer className="rounded-lg bg-panel border border-surface/60 px-4 py-2
+      <footer className="rounded-lg bg-panel shadow-md px-4 py-2
                          grid grid-cols-3 items-center gap-4
                          text-xs text-muted">
         <span className="truncate">stack: Tauri 2 + React + TS + Tailwind</span>

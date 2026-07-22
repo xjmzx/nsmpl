@@ -34,7 +34,7 @@ export function Section({
     <section
       onClick={onClick}
       className={cn(
-        "rounded-xl bg-panel border border-surface/60 shadow-md",
+        "rounded-xl bg-panel shadow-md",
         "p-4 flex flex-col gap-3",
         // min-h-0 lets a parent-flex layout shrink the section below
         // its content height when needed (e.g. when set to flex-1).

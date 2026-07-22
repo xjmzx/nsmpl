@@ -8,7 +8,9 @@
    button — swaps to the upleb.uk orange scheme. Mirrors ndisc. */
 :root {
   --c-bg: 9 13 18;
-  --c-panel: 13 17 23;
+  /* Panel steps clearly above --c-bg so a section reads as raised WITHOUT a
+     stroke (borders dropped — separation is bg-offset + shadow). Matches ntree. */
+  --c-panel: 17 24 33;
   --c-surface: 19 29 42;
   --c-surface-hover: 30 45 61;
   --c-fg: 240 246 252;
@@ -31,7 +33,7 @@
 
 .theme-upleb {
   --c-bg: 10 15 21;
-  --c-panel: 13 17 23;
+  --c-panel: 17 25 34;
   --c-surface: 22 32 45;
   --c-surface-hover: 30 45 61;
   --c-fg: 201 209 217;
@@ -99,7 +101,7 @@ body {
    (see --c-lossy / --c-nostr). */
 .theme-mono {
   --c-bg: 10 10 11;
-  --c-panel: 16 16 18;
+  --c-panel: 21 21 24;
   --c-surface: 28 28 31;
   --c-surface-hover: 44 44 48;
   --c-fg: 240 240 243;
