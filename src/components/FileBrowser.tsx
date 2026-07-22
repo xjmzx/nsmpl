@@ -551,7 +551,11 @@ export function FileBrowser({
       elastic={expanded}
       className={cn(
         "border-digital/30",
-        !expanded && "min-h-[5rem] self-start",
+        // Collapsed, the Library still stretches to fill the row height
+        // (via the grid's items-stretch) so it matches the full-height
+        // Sample/Publish flanks instead of leaving dead space beneath a
+        // short box. min-h-[5rem] is just a floor for a very short row.
+        !expanded && "min-h-[5rem]",
         D.section,
       )}
     >

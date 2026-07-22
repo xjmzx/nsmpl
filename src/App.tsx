@@ -703,9 +703,9 @@ export default function App() {
 
       {/* Bottom-row chip strip — Sample / Library / Publish. Library is the
           dominant column so the deep artist/release/file list breathes; Sample
-          + Publish flank it at equal (tightened) width. items-stretch makes the
-          expanded flanks match Library's height; a content-collapsed panel
-          opts out with self-start so it stays short. */}
+          + Publish flank it at equal (tightened) width. items-stretch makes
+          every panel — expanded or collapsed, Library included — fill the row
+          height, so no panel leaves dead space beneath a short box. */}
       {/* flex-1 min-h-0: the bottom row absorbs whatever height the tracks
           above don't use, so Sample / Library / Publish fill the viewport
           instead of sitting at their content height. min-h-0 is what lets the
