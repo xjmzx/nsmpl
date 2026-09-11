@@ -1,10 +1,10 @@
-// Nostr publishing for smpl-tool.
+// Nostr publishing for nsmpl.
 //
 //   Identity:   nsec held in the OS keychain (libsecret on Linux) via
 //               the Rust `keyring` crate. Dev builds use a separate
 //               keychain service so `make dev` runs don't read or
 //               overwrite the installed binary's identity. Mirrors
-//               ndisc / audio-flac-quality-check-tauri.
+//               ndisc / ntree.
 //   Upload:     NIP-96 (HTTP file storage); default endpoint nostr.build.
 //   Auth:       NIP-98 (HTTP Auth event, kind 27235) with payload hash.
 //   Publish:    NIP-94 (kind 1063 file metadata) over plain WebSocket.
@@ -204,7 +204,7 @@ export interface PublishResult {
 
 // ---- Reactions (kind:7 / kind:5) -------------------------------------
 //
-// Phase-1 plumbing for smpl-tool. There's no inbound-feed UI yet to
+// Phase-1 plumbing for nsmpl. There's no inbound-feed UI yet to
 // react against, so these helpers exist solely so that when smpl
 // gains such a feed (or surfaces a "reactions on my publishes" view)
 // the reaction wiring is already in place + identical in shape to

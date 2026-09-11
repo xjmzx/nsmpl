@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build smpl-tool and install it to /Applications, then relaunch. macOS only.
+# Build nsmpl and install it to /Applications, then relaunch. macOS only.
 #
 #   ./install.sh               # build (release) + quit + install + relaunch
 #   ./install.sh --skip-build  # reinstall the last build without rebuilding
@@ -21,7 +21,9 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-APP_NAME="smpl-tool.app"
+APP_NAME="nsmpl.app"
+# Before the rename the bundle was smpl-tool.app, with the same identifier.
+LEGACY_APP_NAME="smpl-tool.app"
 BUILT="src-tauri/target/release/bundle/macos/$APP_NAME"
 
 if [[ "${1:-}" != "--skip-build" ]]; then
@@ -34,7 +36,7 @@ if [[ "${1:-}" != "--skip-build" ]]; then
     echo "--- Installing npm dependencies (first build here) ---"
     npm install
   fi
-  echo "--- Building smpl-tool (release) ---"
+  echo "--- Building nsmpl (release) ---"
   npm run tauri build
 fi
 
@@ -43,13 +45,18 @@ if [[ ! -d "$BUILT" ]]; then
   exit 1
 fi
 
-echo "--- Quitting running smpl-tool (if any) ---"
+echo "--- Quitting running nsmpl (if any) ---"
+osascript -e 'quit app "nsmpl"' 2>/dev/null || pkill -x nsmpl 2>/dev/null || true
 osascript -e 'quit app "smpl-tool"' 2>/dev/null || pkill -x smpl-tool 2>/dev/null || true
 sleep 1
 
 echo "--- Installing to /Applications ---"
 rm -rf "/Applications/$APP_NAME"
 cp -R "$BUILT" "/Applications/$APP_NAME"
+if [[ -d "/Applications/$LEGACY_APP_NAME" ]]; then
+  echo "--- Removing the pre-rename /Applications/$LEGACY_APP_NAME ---"
+  rm -rf "/Applications/$LEGACY_APP_NAME"
+fi
 
 echo "--- Relaunching ---"
 open "/Applications/$APP_NAME"
@@ -60,7 +67,7 @@ echo "Installed + relaunched: /Applications/$APP_NAME (v$VER)"
 
 echo
 echo "Note: the app is unsigned, so each rebuild gets a fresh ad-hoc signature."
-echo "The Keychain trusts the binary that created an entry, so a rebuilt smpl-tool"
+echo "The Keychain trusts the binary that created an entry, so a rebuilt nsmpl"
 echo "is a different caller and macOS will ask you to authorise access to its"
 echo "key. That is expected in development; 'Always Allow' holds until the next"
 echo "rebuild."

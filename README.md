@@ -86,8 +86,8 @@ just regenerate.
 ## Quick start
 
 ```sh
-git clone https://github.com/xjmzx/smpl-tool.git
-cd smpl-tool
+git clone https://github.com/xjmzx/nsmpl.git
+cd nsmpl
 
 make deps      # npm install + cargo fetch
 make dev       # opens the Tauri window with hot reload
@@ -121,13 +121,13 @@ make build    # release build only
 make clean    # remove dist/ and src-tauri/target/
 ```
 
-The desktop entry is generated from `smpl-tool.desktop.in` with the
+The desktop entry is generated from `nsmpl.desktop.in` with the
 install paths substituted in, so it works regardless of `PREFIX`.
 
 ## Layout
 
 ```
-smpl-tool/
+nsmpl/
 ├── src/                   # React + TS frontend
 │   ├── App.tsx           # main layout: file browser + player + edit + publish
 │   ├── components/        # FileBrowser, Player, EditPanel, NostrPanel, Section
@@ -138,7 +138,7 @@ smpl-tool/
 │   ├── Cargo.toml
 │   └── tauri.conf.json    # window config, bundle config
 ├── icon.svg                       # suite-style 128px tile
-├── smpl-tool.desktop.in           # .desktop template (placeholders)
+├── nsmpl.desktop.in               # .desktop template (placeholders)
 └── Makefile                       # deps / dev / build / install / uninstall
 ```
 

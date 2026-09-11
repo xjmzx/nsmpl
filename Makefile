@@ -3,8 +3,8 @@ BINDIR  ?= $(PREFIX)/bin
 APPDIR  ?= $(PREFIX)/share/applications
 ICONDIR ?= $(PREFIX)/share/icons/hicolor/scalable/apps
 
-DESKTOP_OUT := $(APPDIR)/smpl-tool.desktop
-TAURI_BIN   := src-tauri/target/release/smpl-tool
+DESKTOP_OUT := $(APPDIR)/nsmpl.desktop
+TAURI_BIN   := src-tauri/target/release/nsmpl
 
 .PHONY: help deps dev build install uninstall check clean icons version install-guard
 
@@ -61,12 +61,16 @@ install-guard:
 
 install: install-guard $(TAURI_BIN)
 	install -d $(BINDIR) $(APPDIR) $(ICONDIR)
-	install -m 0755 $(TAURI_BIN) $(BINDIR)/smpl-tool
-	install -m 0644 icon.svg     $(ICONDIR)/smpl-tool.svg
+	install -m 0755 $(TAURI_BIN) $(BINDIR)/nsmpl
+	install -m 0644 icon.svg     $(ICONDIR)/nsmpl.svg
 	sed -e 's|@BINDIR@|$(BINDIR)|g' \
 	    -e 's|@ICONDIR@|$(ICONDIR)|g' \
-	    smpl-tool.desktop.in > $(DESKTOP_OUT)
+	    nsmpl.desktop.in > $(DESKTOP_OUT)
 	chmod 0644 $(DESKTOP_OUT)
+	@# Tidy up the pre-rename smpl-tool install if it's still on disk.
+	@rm -f $(BINDIR)/smpl-tool \
+	       $(APPDIR)/smpl-tool.desktop \
+	       $(ICONDIR)/smpl-tool.svg
 	@if command -v update-desktop-database >/dev/null 2>&1; then \
 		update-desktop-database $(APPDIR) >/dev/null 2>&1 || true; \
 	fi
@@ -74,12 +78,12 @@ install: install-guard $(TAURI_BIN)
 		gtk-update-icon-cache -f -t $(PREFIX)/share/icons/hicolor >/dev/null 2>&1 || true; \
 	fi
 	@echo "installed to $(PREFIX)"
-	@echo "  binary  -> $(BINDIR)/smpl-tool"
+	@echo "  binary  -> $(BINDIR)/nsmpl"
 	@echo "  desktop -> $(DESKTOP_OUT)"
 
 uninstall:
-	rm -f $(BINDIR)/smpl-tool
-	rm -f $(ICONDIR)/smpl-tool.svg
+	rm -f $(BINDIR)/nsmpl
+	rm -f $(ICONDIR)/nsmpl.svg
 	rm -f $(DESKTOP_OUT)
 	@if command -v update-desktop-database >/dev/null 2>&1; then \
 		update-desktop-database $(APPDIR) >/dev/null 2>&1 || true; \

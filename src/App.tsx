@@ -32,6 +32,8 @@ import { renderMix } from "./lib/tauri";
 import { loadIdentity, type Identity } from "./lib/nostr";
 import { cn } from "./lib/cn";
 
+// Storage keys keep the pre-rename smpl-tool prefix on purpose: renaming them
+// would reset every saved setting.
 const THEME_KEY = "smpl-tool.theme";
 const DENSITY_KEY = "smpl-tool.density";
 const TRACKS_VISIBLE_KEY = "smpl-tool.tracksVisible";

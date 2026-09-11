@@ -1,7 +1,6 @@
 # Changelog
 
-All notable changes to **nsmpl** (formerly `ndisc.smpl` / `smpl-tool`; the
-binary is still `smpl-tool`).
+All notable changes to **nsmpl** (formerly `ndisc.smpl` / `smpl-tool`).
 
 nsmpl publishes **NIP-94 (kind:1063)** file metadata and **kind:7** reactions,
 but it is *not* a participant in ndisc's `release.vN` wire contract — it
@@ -18,6 +17,19 @@ below. Where it does share a contract with the suite, that is named in the entry
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
 ## Unreleased
+
+### Changed — named nsmpl everywhere it is shown
+
+- The binary, product name, window title, macOS bundle (`nsmpl.app`), Linux
+  desktop entry and icon, and the release files built from them are now
+  **nsmpl**, matching the repo. They were `smpl-tool` (window title
+  `ndisc.smpl`).
+- **Kept on purpose:** the bundle identifier `uk.fizx.smpltool`, the keychain
+  service `smpl-tool`, and the `smpl-tool.*` localStorage keys. They locate the
+  saved nsec, the settings and the webview storage; renaming them would orphan
+  all three.
+- `make install` and `install.sh` remove the old `smpl-tool` install when they
+  put the new one down.
 
 ### Fixed
 

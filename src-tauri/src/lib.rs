@@ -1,4 +1,4 @@
-// Tauri commands for smpl-tool. See https://tauri.app/develop/calling-rust/
+// Tauri commands for nsmpl. See https://tauri.app/develop/calling-rust/
 
 // External tools (ffmpeg/ffprobe/aubio) are resolved to an absolute path
 // before spawning — see tools.rs for why PATH alone is not enough.
@@ -26,13 +26,15 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "mov", "webm", "m4v", "avi", "wmv", "flv", "mpg", "mpeg", "ogv",
 ];
 
+// Kept on the pre-rename name ON PURPOSE (the app is now nsmpl): the keychain
+// service is a stable identity — renaming it would orphan the stored nsec.
 const KEYRING_SERVICE_RELEASE: &str = "smpl-tool";
 const KEYRING_SERVICE_DEV: &str = "smpl-tool-dev";
 const KEYRING_USER: &str = "default";
 
 /// Debug builds (`tauri dev`) use a separate keychain service so dev
 /// state never reads or writes the real installed-app nsec. Matches
-/// ndisc / audio-flac-quality-check-tauri.
+/// ndisc / ntree.
 fn keyring_service() -> &'static str {
     if cfg!(debug_assertions) {
         KEYRING_SERVICE_DEV
@@ -1036,7 +1038,7 @@ fn escape_concat_path(s: &str) -> String {
 struct Identity {
     npub: String,
     pk: String,      // hex pubkey
-    /// Hex-encoded 32-byte secret key. smpl-tool's publish flow signs
+    /// Hex-encoded 32-byte secret key. nsmpl's publish flow signs
     /// in JS (nostr-tools `finalizeEvent`) so the sk has to leave the
     /// keychain into the renderer. Trade-off: keychain protects the
     /// at-rest secret; per-session JS memory is the unavoidable

@@ -137,7 +137,7 @@ jobs:
       # Unsigned and un-notarised, like the rest of the suite: Gatekeeper
       # refuses the first launch until the app is opened from the context
       # menu, or cleared with
-      # `xattr -dr com.apple.quarantine /Applications/smpl-tool.app`.
+      # `xattr -dr com.apple.quarantine /Applications/nsmpl.app`.
       #
       # ffmpeg / ffprobe / aubio stay runtime tools the user installs, as on
       # Linux — but a Finder-launched .app inherits a minimal PATH without
