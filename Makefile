@@ -31,9 +31,9 @@ dev:
 # Regenerate the Tauri bundle icon set from icon.svg (run once per icon change).
 icons:
 	@if command -v rsvg-convert >/dev/null 2>&1; then \
-		rsvg-convert -w 1024 -h 1024 icon.svg -o app-icon.png; \
+		rsvg-convert -w 2048 -h 2048 icon.svg -o app-icon.png; \
 	elif command -v convert >/dev/null 2>&1; then \
-		convert -background none -resize 1024x1024 icon.svg app-icon.png; \
+		convert -background none -resize 2048x2048 icon.svg app-icon.png; \
 	else \
 		echo "need rsvg-convert (librsvg2-bin) or imagemagick"; exit 1; \
 	fi
