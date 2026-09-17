@@ -3,6 +3,13 @@ BINDIR  ?= $(PREFIX)/bin
 APPDIR  ?= $(PREFIX)/share/applications
 ICONDIR ?= $(PREFIX)/share/icons/hicolor/scalable/apps
 
+# Linux icons crop the grid margin. The masters carry the art in an 824 square
+# on a 1024 canvas (Apple's grid, ICONS.md), which fills 80.5% of the tile --
+# visibly smaller in the dock than Yaru's own icons, which fill 89%. Cropping to
+# this viewBox gets the same 89% out of the master with no re-export. The .icns
+# and the .ico keep the full canvas.
+LINUX_VIEWBOX ?= 49 49 926 926
+
 DESKTOP_OUT := $(APPDIR)/nsmpl.desktop
 TAURI_BIN   := src-tauri/target/release/nsmpl
 
@@ -39,6 +46,23 @@ icons:
 	fi
 	npm run tauri icon ./app-icon.png
 	rm -f app-icon.png
+	@# Linux raster set: these are what the .deb and the AppImage install into
+	@# hicolor, and what Linux uses as the window icon, so re-render them from
+	@# the margin-cropped canvas (ICONS.md, 2026-09-18). The .icns, the .ico and
+	@# the mobile sets keep Apple's grid and stay as `tauri icon` wrote them.
+	@# Needs rsvg-convert and ImageMagick. PNG32: because ImageMagick writes
+	@# palette PNGs at the small sizes, which tauri::generate_context! rejects
+	@# as "not RGBA".
+	sed '1s|viewBox="[^"]*"|viewBox="$(LINUX_VIEWBOX)"|' icon.svg > app-icon-linux.svg
+	rsvg-convert -w 2048 -h 2048 app-icon-linux.svg -o app-icon-linux.png
+	@for n in 32x32 64x64 128x128 128x128@2x 256x256 icon; do \
+		p=src-tauri/icons/$$n.png; \
+		[ -f $$p ] || continue; \
+		s=$$(identify -format '%w' $$p); \
+		convert app-icon-linux.png -resize $${s}x$${s} PNG32:$$p; \
+		echo "  linux icon -> $$p ($$s)"; \
+	done
+	rm -f app-icon-linux.svg app-icon-linux.png
 
 build: $(TAURI_BIN)
 
@@ -62,7 +86,9 @@ install-guard:
 install: install-guard $(TAURI_BIN)
 	install -d $(BINDIR) $(APPDIR) $(ICONDIR)
 	install -m 0755 $(TAURI_BIN) $(BINDIR)/nsmpl
-	install -m 0644 icon.svg     $(ICONDIR)/nsmpl.svg
+	@# Linux fill: crop the grid margin on the way in (see LINUX_VIEWBOX).
+	sed '1s|viewBox="[^"]*"|viewBox="$(LINUX_VIEWBOX)"|' icon.svg > $(ICONDIR)/nsmpl.svg
+	chmod 0644 $(ICONDIR)/nsmpl.svg
 	sed -e 's|@BINDIR@|$(BINDIR)|g' \
 	    -e 's|@ICONDIR@|$(ICONDIR)|g' \
 	    nsmpl.desktop.in > $(DESKTOP_OUT)
