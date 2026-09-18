@@ -4,10 +4,11 @@ APPDIR  ?= $(PREFIX)/share/applications
 ICONDIR ?= $(PREFIX)/share/icons/hicolor/scalable/apps
 
 # Linux icons crop the grid margin. The masters carry the art in an 824 square
-# on a 1024 canvas (Apple's grid, ICONS.md), which fills 80.5% of the tile --
+# on a 1024 canvas (Apple's grid, ndisc/SUITE.md), which fills 80.5% of the tile --
 # visibly smaller in the dock than Yaru's own icons, which fill 89%. Cropping to
-# this viewBox gets the same 89% out of the master with no re-export. The .icns
-# and the .ico keep the full canvas.
+# this viewBox gets the same 89% out of the master with no re-export. The Windows
+# .ico takes the same crop (native Windows icons fill ~100%, so the margin reads
+# small on the taskbar too); only the .icns keeps the full canvas.
 LINUX_VIEWBOX ?= 49 49 926 926
 
 DESKTOP_OUT := $(APPDIR)/nsmpl.desktop
@@ -48,8 +49,8 @@ icons:
 	rm -f app-icon.png
 	@# Linux raster set: these are what the .deb and the AppImage install into
 	@# hicolor, and what Linux uses as the window icon, so re-render them from
-	@# the margin-cropped canvas (ICONS.md, 2026-09-18). The .icns, the .ico and
-	@# the mobile sets keep Apple's grid and stay as `tauri icon` wrote them.
+	@# the margin-cropped canvas (ndisc/SUITE.md, 2026-09-18). The .icns and the
+	@# mobile sets keep Apple's grid and stay as `tauri icon` wrote them.
 	@# Needs rsvg-convert and ImageMagick. PNG32: because ImageMagick writes
 	@# palette PNGs at the small sizes, which tauri::generate_context! rejects
 	@# as "not RGBA".
@@ -62,6 +63,9 @@ icons:
 		convert app-icon-linux.png -resize $${s}x$${s} PNG32:$$p; \
 		echo "  linux icon -> $$p ($$s)"; \
 	done
+	@# Windows .ico from the same crop, at the sizes `tauri icon` writes.
+	convert app-icon-linux.png -define icon:auto-resize=256,64,48,32,24,16 src-tauri/icons/icon.ico
+	@echo "  windows icon -> src-tauri/icons/icon.ico"
 	rm -f app-icon-linux.svg app-icon-linux.png
 
 build: $(TAURI_BIN)
