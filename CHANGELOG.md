@@ -16,6 +16,22 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.4.0-beta.4 — 2026-09-22
+
+### Fixed — search missed names the filesystem holds decomposed
+
+The file and folder filters compared raw strings, so a name stored NFD — this
+library has one, `02 Wöden's Phallus.flac`, with `o` + U+0308 — did not match
+the NFC form a keyboard produces, though the two render identically.
+
+All three filters (file list, folder list, folder tally) now fold both sides at
+comparison time via `src/lib/search.ts`.
+
+**Stored paths are never normalised**: a filename on Linux is a byte string with
+no canonical equivalence at the filesystem layer, so rewriting one to NFC yields
+a path that does not exist. Comparison-time only. Reasoning in ndisc's
+`schema/identity-normalisation-design-2026-09-22.md`.
+
 ## Unreleased
 
 ### Changed — named nsmpl everywhere it is shown

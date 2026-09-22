@@ -29,6 +29,7 @@ import {
 } from "../lib/tauri";
 import { cn } from "../lib/cn";
 import { ClipBar, CoverageBar } from "./CoverageBar";
+import { matches, searchKey } from "../lib/search";
 
 type Density = "super-slim" | "slim" | "wide";
 
@@ -474,10 +475,8 @@ export function FileBrowser({
   }
 
   const sortedFiles = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const arr = q
-      ? files.filter((f) => f.name.toLowerCase().includes(q))
-      : [...files];
+    const q = searchKey(query.trim());
+    const arr = q ? files.filter((f) => matches(f.name, q)) : [...files];
     arr.sort((a, b) => {
       let v: number;
       if (sort.key === "name") {
@@ -500,9 +499,9 @@ export function FileBrowser({
   // Folder-mode rows: filtered by the search box (on rel) and the has/no-audio
   // toggle. Already sorted by rel from the backend.
   const shownFolders = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = searchKey(query.trim());
     return folders.filter((f) => {
-      if (q && !f.rel.toLowerCase().includes(q)) return false;
+      if (q && !matches(f.rel, q)) return false;
       if (audioFilter === "has" && f.audioCount === 0) return false;
       if (audioFilter === "none" && f.audioCount > 0) return false;
       if (releasedFilter && !inReleased(f.rel)) return false;
@@ -512,10 +511,8 @@ export function FileBrowser({
 
   // Tally for the filter chips (over the search-filtered set).
   const folderTotals = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const base = q
-      ? folders.filter((f) => f.rel.toLowerCase().includes(q))
-      : folders;
+    const q = searchKey(query.trim());
+    const base = q ? folders.filter((f) => matches(f.rel, q)) : folders;
     const has = base.filter((f) => f.audioCount > 0).length;
     return { all: base.length, has, none: base.length - has };
   }, [folders, query]);
