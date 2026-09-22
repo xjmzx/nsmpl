@@ -25,13 +25,24 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Nostr identity: keypair generation, bech32 nsec/npub encoding. Matches ndisc.
 nostr = "0.43"
-# OS keychain (libsecret on Linux via secret-service). Matches ndisc.
+
+# --- OS keychain backend, per platform --------------------------------------
+# Every platform must name its backend explicitly. With none for the platform
+# being built, the crate does not fail — it silently falls back to its in-memory
+# `mock` store, which accepts a key, returns it for the rest of the process and
+# loses it on restart, with no error at any point. A vanished signing key,
+# reported as success. See SUITE.md, "Shared architecture conventions".
+#
+# macOS was missing here until 2026-09-22 and hit exactly that: the nsec was
+# accepted, the footer said "stored in keychain", and the next command that
+# needed it answered "no Nostr identity stored". Worse than losing it on
+# restart — `keyring_entry()` builds a new Entry per call and the mock keeps its
+# credential per-instance, so the write and the read never saw the same store.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Windows needs its own keyring backend named explicitly. Without one the crate
-# does not fail — it silently falls back to its in-memory `mock` store, which
-# accepts a key, returns it for the rest of the process, and loses it on restart
-# with no error at any point. A vanished signing key, reported as success. See
-# SUITE.md, "Shared architecture conventions".
 keyring = { version = "3", default-features = false, features = ["windows-native"] }

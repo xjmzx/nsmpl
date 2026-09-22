@@ -82,13 +82,31 @@ export async function saveKey(input: string): Promise<Identity> {
   } else {
     throw new Error("expected nsec1… or 64-char hex");
   }
-  const r = await invoke<RustIdentity>("import_identity", { nsec });
-  return fromRust(r);
+  await invoke<RustIdentity>("import_identity", { nsec });
+  // Re-read rather than trusting what the write returned. A keyring build with
+  // no backend for the platform accepts the write, reports success and stores
+  // nothing — which is how macOS ended up showing "nsec stored in keychain"
+  // while every command that needed the key answered "no Nostr identity
+  // stored". loadIdentity goes through get_identity -> load_nsec, so it only
+  // answers if the key actually survived the round trip.
+  const stored = await loadIdentity();
+  if (!stored) {
+    throw new Error(
+      "the key was accepted but is not in the keychain — this build has no keyring backend for this platform",
+    );
+  }
+  return stored;
 }
 
 export async function generateIdentity(): Promise<Identity> {
   const r = await invoke<RustIdentity>("generate_identity");
   return fromRust(r);
+}
+
+/** Which OS store this build compiled in. Named by Rust so the UI cannot claim
+ *  a keychain the binary has no backend for. */
+export async function keyringBackend(): Promise<string> {
+  return invoke<string>("keyring_backend");
 }
 
 export async function clearIdentity(): Promise<void> {

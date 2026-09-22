@@ -29,7 +29,7 @@ import { BounceStatus, type BounceView } from "./components/BounceStatus";
 import { ToolbarIconButton } from "./components/ToolbarIconButton";
 import type { AudioFile, AudioInfo } from "./lib/tauri";
 import { renderMix } from "./lib/tauri";
-import { loadIdentity, type Identity } from "./lib/nostr";
+import { keyringBackend, loadIdentity, type Identity } from "./lib/nostr";
 import { cn } from "./lib/cn";
 
 // Storage keys keep the pre-rename smpl-tool prefix on purpose: renaming them
@@ -135,6 +135,7 @@ export default function App() {
   // manual refresh.
   const [editCount, setEditCount] = useState(0);
   const [identity, setIdentity] = useState<Identity | null>(null);
+  const [keyringStore, setKeyringStore] = useState<string>("…");
   // Surfaces any failure from the loadIdentity → Rust get_identity
   // call so we can actually see what's going wrong on the
   // intermittent "doesn't remember nsec" complaint, instead of
@@ -503,6 +504,12 @@ export default function App() {
   // failed instead of just landing on a logged-out screen with no
   // explanation.
   useEffect(() => {
+    keyringBackend()
+      .then(setKeyringStore)
+      .catch(() => setKeyringStore("unknown"));
+  }, []);
+
+  useEffect(() => {
     loadIdentity()
       .then((id) => {
         setIdentity(id);
@@ -780,10 +787,10 @@ export default function App() {
               </span>
               <span
                 className="inline-flex items-center gap-1 text-ok"
-                title="signed in · nsec stored in OS keychain (libsecret on Linux)"
+                title={`signed in · nsec stored in ${keyringStore}`}
               >
                 <Lock size={11} />
-                <span>nsec stored in keychain</span>
+                <span>nsec stored in {keyringStore}</span>
               </span>
             </span>
           ) : (
