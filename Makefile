@@ -70,7 +70,7 @@ icons:
 
 build: $(TAURI_BIN)
 
-$(TAURI_BIN): $(shell find src src-tauri/src -type f) package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+$(TAURI_BIN): $(shell find src src-tauri/src src-tauri/icons -type f) package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
 	npm run tauri build -- --no-bundle
 
 check:
