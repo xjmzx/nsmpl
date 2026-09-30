@@ -47,7 +47,7 @@ icons:
 	fi
 	npm run tauri icon ./app-icon.png
 	rm -f app-icon.png
-	@# Linux raster set: these are what the .deb and the AppImage install into
+	@# Linux raster set: these are what the .deb installs into
 	@# hicolor, and what Linux uses as the window icon, so re-render them from
 	@# the margin-cropped canvas (ndisc/SUITE.md, 2026-09-18). The .icns and the
 	@# mobile sets keep Apple's grid and stay as `tauri icon` wrote them.
