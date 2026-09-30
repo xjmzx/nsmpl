@@ -16,6 +16,27 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.5.1 — 2026-09-30
+
+### Fixed
+
+- **macOS now actually stores the signing key.** The macOS build had no
+  keychain backend compiled in, so the keyring library fell back to an
+  in-memory placeholder: it accepted a key, reported success and kept nothing,
+  not even until the next command. Every platform now names its backend
+  explicitly (Keychain on macOS, Secret Service on Linux, Credential Manager
+  on Windows), the UI reports the backend the build really has instead of
+  saying "libsecret" everywhere, and saving a key reads it back to confirm.
+  Linux and Windows builds are unchanged.
+
+### Changed
+
+- **Linux releases ship a `.deb` only.** The AppImage bundled its own
+  webkit2gtk (~80 MB against the `.deb`'s ~6 MB) for distros nobody here runs,
+  and needs libfuse2 on current Ubuntu. Other distros can build from source.
+  Earlier releases keep theirs.
+- **New icon**, from the 2026-09-29 Figma export.
+
 ## 0.4.0-beta.4 — 2026-09-22
 
 ### Fixed — search missed names the filesystem holds decomposed
