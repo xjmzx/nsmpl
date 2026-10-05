@@ -16,6 +16,18 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.6.1 — 2026-10-06
+
+### Changed — the default relays are our own
+
+The default publish list is `relay.fizx.uk` + `relay.nfunc.xyz`, in place of
+`relay.fizx.uk` + `nos.lol` + `relay.primal.net`. Neither public relay kept this
+key's events, and the rest of the suite had already moved.
+
+A saved list that is exactly the old default follows the new one — it was the
+seed, never a choice. Any other saved list is yours and is left alone. Both
+relays are whitelist-only. Nothing already published moves or is deleted.
+
 ## 0.6.0 — 2026-10-06
 
 ### Changed — a clip's web copy is an `.m4a`
