@@ -1,5 +1,5 @@
 // The three suite roots, persisted per-app (the keys FileBrowser's switcher
-// writes). Source = masters, Web = derived Opus copies, Clips = the editable
+// writes). Source = masters, Web = derived AAC copies, Clips = the editable
 // FLAC working set. Read live from localStorage so this tracks whatever the
 // switcher has been repointed to.
 export const SRC_ROOT_KEY = "smpl-tool.root.source";
@@ -22,12 +22,12 @@ function under(path: string, root: string): boolean {
 
 /**
  * Destructive edits (trim / prune / gain / pad) must never touch a SOURCE master
- * or a derived WEB (Opus) copy — only the FLAC clips are the working set. Returns
+ * or a derived WEB (AAC) copy — only the FLAC clips are the working set. Returns
  * a short human reason when a path is off-limits, else null (editable).
  */
 export function editGuardReason(path: string | null | undefined): string | null {
   if (!path) return null;
   if (under(path, sourceRoot())) return "source master";
-  if (under(path, webRoot())) return "web (Opus) copy";
+  if (under(path, webRoot())) return "web (AAC) copy";
   return null;
 }

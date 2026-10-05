@@ -45,7 +45,7 @@ export async function listLeafFolders(dir: string): Promise<FolderEntry[]> {
   return invoke<FolderEntry[]>("list_leaf_folders", { dir });
 }
 
-/// Does a path exist on disk? Used to offer the Opus web copy of a FLAC clip
+/// Does a path exist on disk? Used to offer the AAC web copy of a FLAC clip
 /// at publish time only when it has actually been compressed.
 export async function pathExists(path: string): Promise<boolean> {
   return invoke<boolean>("path_exists", { path });
@@ -75,9 +75,9 @@ export interface ClipCoverage {
   path: string;
   clipSecs: number | null;
   sourceSecs: number | null;
-  /** The clip's Opus web copy exists under the web root (compress-dest mirror).
+  /** The clip's AAC web copy exists under the web root (compress-dest mirror).
    *  Drives the third coverage-by-type dot. */
-  opusExists: boolean;
+  webExists: boolean;
 }
 
 export async function folderCoverage(

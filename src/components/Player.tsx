@@ -844,7 +844,7 @@ export const Player = forwardRef<PlayerHandle, PlayerProps>(function Player(
   }
 
   // Read-only guard: destructive edits must not touch a source master or a web
-  // (Opus) copy — only the FLAC clips are the working set. `guardReason` is the
+  // (AAC) copy — only the FLAC clips are the working set. `guardReason` is the
   // human explanation (null ⇒ editable); it disables the whole edits row.
   const guardReason = editGuardReason(file?.path);
   const editGuarded = guardReason !== null;

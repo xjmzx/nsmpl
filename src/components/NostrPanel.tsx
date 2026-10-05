@@ -62,11 +62,13 @@ const MIME_BY_EXT: Record<string, string> = {
   wv: "audio/x-wavpack",
 };
 
-// The Compress step (ntree) writes Opus web copies here, mirroring the clips
+// The Compress step (ntree) writes AAC web copies (.m4a) here, mirroring the clips
 // tree. Keys match FileBrowser's persisted per-app roots.
 const WEB_ROOT_KEY = "smpl-tool.root.web";
 const DEFAULT_WEB_ROOT = "/data/music_clips_comp";
 const DEFAULT_CLIPS_ROOT = "/data/music_clips";
+// Must match ntree's WEB_CLIP_EXT — a web copy is found by name alone.
+const WEB_CLIP_EXT = "m4a";
 
 function mimeFor(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -140,11 +142,11 @@ export function NostrPanel({
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [copied, setCopied] = useState<string | null>(null);
 
-  // Publish format — the FLAC clip vs its Opus web copy. flacPath/opusPath are
+  // Publish format — the FLAC clip vs its AAC web copy. flacPath/webPath are
   // the on-disk counterparts (null when absent); format is the current choice.
-  const [format, setFormat] = useState<"flac" | "opus">("flac");
+  const [format, setFormat] = useState<"flac" | "web">("flac");
   const [flacPath, setFlacPath] = useState<string | null>(null);
-  const [opusPath, setOpusPath] = useState<string | null>(null);
+  const [webPath, setWebPath] = useState<string | null>(null);
 
   // Default the title to the filename stem when a sample is selected.
   useEffect(() => {
@@ -153,43 +155,46 @@ export function NostrPanel({
     setTitle((prev) => (prev.trim() ? prev : stem));
   }, [file?.path]);
 
-  // Resolve the FLAC + Opus counterparts of the selected clip so the publisher
+  // Resolve the FLAC + AAC counterparts of the selected clip so the publisher
   // can offer a choice. `rel` is taken relative to whichever tree the file lives
   // in (clips or web); the sibling is the same `rel` under the other root.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setFlacPath(null);
-      setOpusPath(null);
+      setWebPath(null);
       setFormat("flac");
       if (!file) return;
-      const isFlac = /\.flac$/i.test(file.path);
-      const isOpus = /\.opus$/i.test(file.path);
-      if (!isFlac && !isOpus) return; // only FLAC clips / Opus copies pair up
       const cr = (await clipsRoot().catch(() => null)) ?? DEFAULT_CLIPS_ROOT;
       const wr = localStorage.getItem(WEB_ROOT_KEY) ?? DEFAULT_WEB_ROOT;
+      const webExt = new RegExp(`\\.${WEB_CLIP_EXT}$`, "i");
+      const isFlac = /\.flac$/i.test(file.path);
+      // An .m4a is a web copy only inside the web root — elsewhere it is just
+      // somebody's AAC file, and has no FLAC twin to pair with.
+      const isWeb = webExt.test(file.path) && file.path.startsWith(wr + "/");
+      if (!isFlac && !isWeb) return; // only FLAC clips / web copies pair up
       let rel: string | null = null;
       if (file.path.startsWith(cr + "/")) rel = file.path.slice(cr.length + 1);
       else if (file.path.startsWith(wr + "/")) rel = file.path.slice(wr.length + 1);
       const flacCand = isFlac
         ? file.path
         : rel
-          ? `${cr}/${rel.replace(/\.opus$/i, ".flac")}`
+          ? `${cr}/${rel.replace(webExt, ".flac")}`
           : null;
-      const opusCand = isOpus
+      const webCand = isWeb
         ? file.path
         : rel
-          ? `${wr}/${rel.replace(/\.flac$/i, ".opus")}`
+          ? `${wr}/${rel.replace(/\.flac$/i, `.${WEB_CLIP_EXT}`)}`
           : null;
-      const [flacOk, opusOk] = await Promise.all([
+      const [flacOk, webOk] = await Promise.all([
         flacCand ? pathExists(flacCand) : Promise.resolve(false),
-        opusCand ? pathExists(opusCand) : Promise.resolve(false),
+        webCand ? pathExists(webCand) : Promise.resolve(false),
       ]);
       if (cancelled) return;
       setFlacPath(flacOk ? flacCand : null);
-      setOpusPath(opusOk ? opusCand : null);
-      // Default to the Opus web copy when it exists (the web-publish artifact).
-      setFormat(opusOk ? "opus" : "flac");
+      setWebPath(webOk ? webCand : null);
+      // Default to the AAC web copy when it exists (the web-publish artifact).
+      setFormat(webOk ? "web" : "flac");
     })();
     return () => {
       cancelled = true;
@@ -199,8 +204,8 @@ export function NostrPanel({
 
   // The path + name actually published, per the format choice.
   const publishPath =
-    format === "opus"
-      ? (opusPath ?? file?.path ?? "")
+    format === "web"
+      ? (webPath ?? file?.path ?? "")
       : (flacPath ?? file?.path ?? "");
   const publishName = publishPath.split("/").pop() ?? file?.name ?? "";
 
@@ -467,9 +472,9 @@ export function NostrPanel({
           <span className="text-[10px] uppercase tracking-wide text-muted">
             Title
           </span>
-          {/* Publish format — shown only when both the FLAC clip and its Opus
-              web copy exist. Opus is the default (the web-publish artifact). */}
-          {flacPath && opusPath && (
+          {/* Publish format — shown only when both the FLAC clip and its AAC
+              web copy exist. AAC is the default (the web-publish artifact). */}
+          {flacPath && webPath && (
             <div className="flex gap-0.5 text-[10px] font-medium">
               <button
                 type="button"
@@ -486,16 +491,16 @@ export function NostrPanel({
               </button>
               <button
                 type="button"
-                onClick={() => setFormat("opus")}
-                title="Publish the web-optimized Opus copy"
+                onClick={() => setFormat("web")}
+                title="Publish the web-optimized AAC copy"
                 className={cn(
                   "px-1.5 py-0.5 rounded",
-                  format === "opus"
+                  format === "web"
                     ? "bg-accent text-bg"
                     : "bg-surface text-muted hover:text-fg",
                 )}
               >
-                Opus
+                AAC
               </button>
             </div>
           )}

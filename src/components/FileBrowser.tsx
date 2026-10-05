@@ -241,7 +241,7 @@ export function FileBrowser({
 }: FileBrowserProps) {
   const D = DENSITY[density];
   const [dir, setDir] = useState(() => localStorage.getItem(DIR_KEY) ?? "");
-  // Source (music) + Web (Opus) roots — the two per-app quick-jump targets that
+  // Source (music) + Web (AAC) roots — the two per-app quick-jump targets that
   // complement the manifest-derived Clips `home`. Shift-click their toolbar
   // buttons to re-point them.
   const [sourceRoot, setSourceRoot] = useState(
@@ -428,7 +428,7 @@ export function FileBrowser({
       title:
         which === "source"
           ? "Set the source library root"
-          : "Set the web (Opus) clips root",
+          : "Set the web (AAC) clips root",
       defaultPath: cur || undefined,
     });
     if (typeof picked !== "string") return;
@@ -526,15 +526,15 @@ export function FileBrowser({
 
   // Which of the three suite trees this listing belongs to — drives the single
   // per-view type marker, so a glance says whether you're browsing (and about
-  // to select from) source FLAC, 10s FLAC clips, or Opus web copies. null when
+  // to select from) source FLAC, 10s FLAC clips, or AAC web copies. null when
   // the dir sits outside all three roots. The `+ "/"` in underRoot guards the
   // music / music_clips / music_clips_comp prefix overlap.
-  const viewType: "source" | "clip" | "opus" | null = underRoot(sourceRoot)
+  const viewType: "source" | "clip" | "web" | null = underRoot(sourceRoot)
     ? "source"
     : underRoot(home)
       ? "clip"
       : underRoot(webRoot)
-        ? "opus"
+        ? "web"
         : null;
   const filterActive = query.trim().length > 0;
   const noMatches =
@@ -601,8 +601,8 @@ export function FileBrowser({
         {/* Root switcher — two quick-jumps (Source · Clips), acting on the path
             field to their left. Clips is the manifest home (source resolution +
             coverage read from it); Source is a per-app root (shift-click to
-            re-point). The Opus/web tree is no longer a browse target — it's
-            surfaced as a per-row "opus exists" chip in the clip view instead.
+            re-point). The web (AAC) tree is no longer a browse target — it's
+            surfaced as a per-row "web copy exists" chip in the clip view instead.
             The active view is inverted so the current tree reads at a glance. */}
         <div className="flex gap-0.5">
           <button
@@ -892,7 +892,7 @@ export function FileBrowser({
                 <CoverageBar rows={[...coverage.values()]} />
               </span>
               {/* Column header names the current view's type; in the clip view
-                  a dim Globe labels the per-row "opus exists" chip. */}
+                  a dim Globe labels the per-row "web copy exists" chip. */}
               {viewType ? (
                 <span className="flex items-center justify-end gap-1.5">
                   <ViewMarker type={viewType} showLabel />
@@ -986,7 +986,7 @@ export function FileBrowser({
               )}
               {sortedFiles.map((f) => {
                 const dur = durationOf(f, coverage);
-                const opus = coverage.get(f.path)?.opusExists ?? false;
+                const web = coverage.get(f.path)?.webExists ?? false;
                 return (
                 <li
                   key={f.path}
@@ -1022,14 +1022,14 @@ export function FileBrowser({
                   {viewType ? (
                     <span className="flex items-center justify-end gap-1.5 shrink-0">
                       <ViewMarker type={viewType} />
-                      {/* Opus web-copy presence — surfaced here instead of a
-                          separate Opus browse view (the tree is a FLAC mirror). */}
+                      {/* AAC web-copy presence — surfaced here instead of a
+                          separate web browse view (the tree is a FLAC mirror). */}
                       {viewType === "clip" && (
                         <span
-                          title={`Opus web copy — ${opus ? "present" : "absent"}`}
+                          title={`AAC web copy — ${web ? "present" : "absent"}`}
                           className={cn(
                             "inline-flex",
-                            opus ? "text-opus" : "text-muted/30",
+                            web ? "text-web" : "text-muted/30",
                           )}
                         >
                           <Globe size={12} />
@@ -1055,14 +1055,14 @@ export function FileBrowser({
 // The three library views and their type marks. Source keeps the Music icon;
 // the clip view marks with a plain suite dot (the neutral --c-medium mark used
 // for leaf/coverage dots across the suite — off-white in mono, green in colour);
-// Opus keeps its stable identity — the --c-opus blue + Globe icon set in ntree.
+// The web copy keeps its stable identity — the --c-web blue + Globe icon set in ntree.
 const VIEW_MARK: Record<
-  "source" | "clip" | "opus",
+  "source" | "clip" | "web",
   { Icon?: LucideIcon; cls: string; label: string; short: string }
 > = {
   source: { Icon: Music, cls: "text-medium", label: "source audio", short: "source" },
   clip: { cls: "text-medium", label: "10s FLAC clip", short: "clip" },
-  opus: { Icon: Globe, cls: "text-opus", label: "Opus web copy", short: "opus" },
+  web: { Icon: Globe, cls: "text-web", label: "AAC web copy", short: "aac" },
 };
 
 // A single per-view type marker: which of the three trees this listing belongs
@@ -1073,7 +1073,7 @@ function ViewMarker({
   type,
   showLabel,
 }: {
-  type: "source" | "clip" | "opus";
+  type: "source" | "clip" | "web";
   showLabel?: boolean;
 }) {
   const M = VIEW_MARK[type];
