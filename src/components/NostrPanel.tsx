@@ -24,13 +24,26 @@ import {
 } from "../lib/nostr";
 import { cn } from "../lib/cn";
 
-// damus rate-limits batch publish — kept out of the seed list. Use
-// fizx.uk + nos.lol + primal as the default trio.
-const DEFAULT_RELAYS = [
+// The suite's own pair: the hub and its mirror. It was fizx + nos.lol + primal
+// until 0.6.1 — neither public relay kept this key's events (checked
+// 2026-10-02), and ndisc, nplay, nview and ntune had already moved.
+const DEFAULT_RELAYS = ["wss://relay.fizx.uk", "wss://relay.nfunc.xyz"];
+
+// The old default, exactly. A saved list equal to it was never a choice — it is
+// the seed, written back on first run — so it follows the default. Any other
+// saved list is the user's own and is left alone.
+const OLD_DEFAULT_RELAYS = [
   "wss://relay.fizx.uk",
   "wss://nos.lol",
   "wss://relay.primal.net",
 ];
+
+function isOldDefault(list: string[]): boolean {
+  return (
+    list.length === OLD_DEFAULT_RELAYS.length &&
+    OLD_DEFAULT_RELAYS.every((r) => list.includes(r))
+  );
+}
 
 const RELAYS_KEY = "smpl-tool.relays";
 
@@ -40,7 +53,7 @@ function loadRelays(): string[] {
     if (!raw) return DEFAULT_RELAYS;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
-      return parsed;
+      return isOldDefault(parsed) ? DEFAULT_RELAYS : parsed;
     }
   } catch {
     /* fallthrough */
