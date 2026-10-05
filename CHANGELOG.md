@@ -16,6 +16,22 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.6.0 — 2026-10-06
+
+### Changed — a clip's web copy is an `.m4a`
+
+ntree 0.4.0 writes the web-optimised copy of a clip as AAC (`track.10s.m4a`)
+where it used to write Opus (`track.10s.opus`). nsmpl finds that copy by name, so
+it now looks for the `.m4a`: the per-row web-copy chip, the coverage bars and the
+publisher's format toggle (now **FLAC / AAC**) all follow.
+
+An `.m4a` counts as a web copy **only inside the web-clips root**. Anywhere else
+it is an ordinary AAC file — a sample of your own — and is not paired with a FLAC
+clip.
+
+Existing `.opus` copies are no longer recognised. **Upgrade together with
+ntree 0.4.0** and re-run its Compress step.
+
 ## 0.5.1 — 2026-09-30
 
 ### Fixed
