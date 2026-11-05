@@ -24,10 +24,22 @@ import {
 } from "../lib/nostr";
 import { cn } from "../lib/cn";
 
-// The suite's own pair: the hub and its mirror. It was fizx + nos.lol + primal
-// until 0.6.1 — neither public relay kept this key's events (checked
-// 2026-10-02), and ndisc, nplay, nview and ntune had already moved.
-const DEFAULT_RELAYS = ["wss://relay.fizx.uk", "wss://relay.nfunc.xyz"];
+// The suite's own relay. It was fizx + nos.lol + primal until 0.6.1 — neither
+// public relay kept this key's events (checked 2026-10-02) — then fizx + nfunc;
+// fizx.uk was decommissioned and no longer resolves, so nfunc is the only one.
+const DEFAULT_RELAYS = ["wss://relay.nfunc.xyz"];
+
+// Dead relays stripped from any saved list on load (decommissioned servers).
+const DEAD_RELAY_HOSTS = ["relay.fizx.uk"];
+
+function isDeadRelay(url: string): boolean {
+  const host = url
+    .trim()
+    .replace(/^wss?:\/\//i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+  return DEAD_RELAY_HOSTS.includes(host);
+}
 
 // The old default, exactly. A saved list equal to it was never a choice — it is
 // the seed, written back on first run — so it follows the default. Any other
@@ -53,7 +65,11 @@ function loadRelays(): string[] {
     if (!raw) return DEFAULT_RELAYS;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) {
-      return isOldDefault(parsed) ? DEFAULT_RELAYS : parsed;
+      if (isOldDefault(parsed)) return DEFAULT_RELAYS;
+      // Idempotent: drop dead relays; a list left empty follows the default.
+      // The result is written back by the persist effect, so this runs once.
+      const live = parsed.filter((r) => !isDeadRelay(r));
+      return live.length > 0 ? live : DEFAULT_RELAYS;
     }
   } catch {
     /* fallthrough */

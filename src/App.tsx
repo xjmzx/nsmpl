@@ -41,7 +41,7 @@ const TRACK_PATHS_KEY = "smpl-tool.tracks.paths";
 const TRACK_EXPANDED_KEY = "smpl-tool.tracks.expanded";
 const EDITS_EXPANDED_KEY = "smpl-tool.editsExpanded";
 const LIBRARY_EXPANDED_KEY = "smpl-tool.library.expanded";
-const PROFILE_RELAYS = ["wss://relay.fizx.uk"];
+const PROFILE_RELAYS = ["wss://relay.nfunc.xyz"];
 /** Monochrome is the default: chrome greyscale, meaning keeps its colour. */
 type Theme = "fizx" | "upleb" | "mono";
 type Density = "super-slim" | "slim" | "wide";

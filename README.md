@@ -3,12 +3,12 @@
 # nsmpl
 
 Local audio sample tool with Nostr publishing — companion to the
-[smpl.fizx.uk](https://smpl.fizx.uk) sample-sharing site.
+[smpl.upleb.uk](https://smpl.upleb.uk) sample-sharing site.
 
 **Stack:** Tauri 2 desktop binary + React 19 + TypeScript + Tailwind v3.
 Frontend is `bun`/`npm`-friendly Vite. Native filesystem access goes
 through Rust commands. Choice rationale: web tech matches the
-`smpl.fizx.uk` site so Nostr/audio code is reusable, while Tauri ships
+`smpl.upleb.uk` site so Nostr/audio code is reusable, while Tauri ships
 the result as a real Linux desktop app that fits the rest of the suite.
 
 ## Features
@@ -38,7 +38,7 @@ the result as a real Linux desktop app that fits the rest of the suite.
 - **Publish a sample to Nostr** — NIP-96 HTTP upload (default
   `nostr.build`) with NIP-98 auth, then a NIP-94 **kind:1063**
   file-metadata event over a relay, so it surfaces on
-  [`smpl.fizx.uk`](https://smpl.fizx.uk) rather than reimplementing the
+  [`smpl.upleb.uk`](https://smpl.upleb.uk) rather than reimplementing the
   reader.
 
 ## Still to come
@@ -150,5 +150,5 @@ nsmpl/
 
 ## Related upstream
 
-- [`smpl.fizx.uk`](https://smpl.fizx.uk) — live web client that
+- [`smpl.upleb.uk`](https://smpl.upleb.uk) — live web client that
   consumes the kind 1063 (NIP-94) events this app publishes.

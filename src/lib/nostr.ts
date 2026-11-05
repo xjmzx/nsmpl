@@ -9,7 +9,7 @@
 //   Auth:       NIP-98 (HTTP Auth event, kind 27235) with payload hash.
 //   Publish:    NIP-94 (kind 1063 file metadata) over plain WebSocket.
 //
-// Mirrors the upload + publish flow used by https://smpl.fizx.uk (which
+// Mirrors the upload + publish flow used by https://smpl.upleb.uk (which
 // signs via NIP-07 browser extension instead) so events surface there.
 
 import { invoke } from "@tauri-apps/api/core";

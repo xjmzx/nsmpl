@@ -16,6 +16,20 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## Unreleased
+
+### Changed — relay.fizx.uk is gone: relay.nfunc.xyz is the only default relay
+
+The fizx.uk server was decommissioned and `relay.fizx.uk` no longer resolves.
+The default publish list is now just **`wss://relay.nfunc.xyz`** — the same
+nostr-rs-relay build, already holding the catalogue — and the header profile is
+read from it too.
+
+On load, `relay.fizx.uk` is removed from a saved relay list (with or without
+`wss://` or a trailing slash). A list left empty by that falls back to the
+default; any other relay you added stays. The README now links the sample site's
+live twin, `smpl.upleb.uk`, in place of `smpl.fizx.uk`.
+
 ## 0.6.1 — 2026-10-06
 
 ### Changed — the default relays are our own
