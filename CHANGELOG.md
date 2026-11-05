@@ -16,7 +16,7 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
-## Unreleased
+## 0.6.2 — 2026-11-05
 
 ### Changed — relay.fizx.uk is gone: relay.nfunc.xyz is the only default relay
 

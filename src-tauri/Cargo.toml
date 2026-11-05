@@ -1,6 +1,6 @@
 [package]
 name = "nsmpl"
-version = "0.6.1"
+version = "0.6.2"
 description = "Local audio sample tool with Nostr publishing"
 authors = ["xjmzx"]
 edition = "2021"
