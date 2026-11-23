@@ -16,6 +16,23 @@ below. Where it does share a contract with the suite, that is named in the entry
 > than notes taken at the time. Treat the git log as canonical if they ever
 > disagree. **0.3.0-beta.1** and **0.3.0-beta.6** were never tagged.
 
+## 0.6.3 — 2026-11-24
+
+### Added — update check on the version chip
+
+The version chip now checks GitHub once a day for a newer published release
+(`/releases/latest`, so pre-release tags never count). When one exists, a dot
+appears on the chip's corner; clicking the chip opens a popover with the status,
+a link to the release page, **Check now**, and a **Check daily** switch to turn
+it off. Notify-only: nothing is downloaded or installed. Shared with ndisc —
+`src/lib/updateCheck.ts` and `src/components/VersionChip.tsx` are vendored, only
+`APP_REPO` differs.
+
+### Changed — new icon
+
+New icon master from the suite's icon set; the Linux raster sizes are
+regenerated from it (`make icons`).
+
 ## 0.6.2 — 2026-11-05
 
 ### Changed — relay.fizx.uk is gone: relay.nfunc.xyz is the only default relay

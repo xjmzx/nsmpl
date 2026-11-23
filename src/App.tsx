@@ -31,6 +31,7 @@ import type { AudioFile, AudioInfo } from "./lib/tauri";
 import { renderMix } from "./lib/tauri";
 import { keyringBackend, loadIdentity, type Identity } from "./lib/nostr";
 import { cn } from "./lib/cn";
+import { VersionChip } from "./components/VersionChip";
 
 // Storage keys keep the pre-rename smpl-tool prefix on purpose: renaming them
 // would reset every saved setting.
@@ -113,13 +114,6 @@ function shortNpub(npub: string): string {
 type TrackIdx = 0 | 1;
 type TrackPair<T> = [T, T];
 
-// Suite rule (n-suite headers): the version chip shows only
-// major.minor.patch; any pre-release/build suffix (…-beta.2, +build) drops
-// to the tooltip so the chip keeps a fixed, consistent width as releases
-// move from 0.2.0-beta.2 toward 1.3.1.
-function shortVersion(v: string): string {
-  return v.split(/[-+]/)[0];
-}
 
 export default function App() {
   // Per-track state. FileBrowser clicks route to `focused`, and the
@@ -574,16 +568,7 @@ export default function App() {
             <span className="text-accent">n</span>
             <span className="text-mauve">smpl</span>
           </button>
-          {appVersion && (
-            <span
-              className="hidden md:inline-flex items-center px-2.5 py-2
-                         rounded-md bg-surface text-mauve font-mono text-xs
-                         shrink-0"
-              title={`v${appVersion}`}
-            >
-              v{shortVersion(appVersion)}
-            </span>
-          )}
+          {appVersion && <VersionChip version={appVersion} />}
           {/* Density selector lives in the left identity zone beside the
               version, bare (no icon/label) — shared placement + styling with
               ntree (SUITE.md § Top-bar grammar). */}
